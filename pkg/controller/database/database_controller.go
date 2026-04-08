@@ -147,6 +147,15 @@ func (r *ReconcileDatabase) Reconcile(ctx context.Context, request reconcile.Req
 					Tolerations:                   tolerations,
 					TerminationGracePeriodSeconds: &tenSeconds,
 					ServiceAccountName:            serviceAccountName,
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: boolPtr(true),
+						RunAsUser:    int64Ptr(1001),
+						RunAsGroup:   int64Ptr(1001),
+						FSGroup:      int64Ptr(1001),
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
 					Containers: []corev1.Container{
 						{
 							Image:           schemaHeroManagerImage,
@@ -154,6 +163,17 @@ func (r *ReconcileDatabase) Reconcile(ctx context.Context, request reconcile.Req
 							Name:            "manager",
 							Command:         []string{"/manager"},
 							Args:            buildDatabaseControllerArgs(databaseInstance, r.pluginRegistry, r.pluginTag),
+							SecurityContext: &corev1.SecurityContext{
+								AllowPrivilegeEscalation: boolPtr(false),
+								RunAsNonRoot:             boolPtr(true),
+								RunAsUser:                int64Ptr(1001),
+								Capabilities: &corev1.Capabilities{
+									Drop: []corev1.Capability{"ALL"},
+								},
+								SeccompProfile: &corev1.SeccompProfile{
+									Type: corev1.SeccompProfileTypeRuntimeDefault,
+								},
+							},
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("1"),
@@ -279,6 +299,9 @@ func createTolerations(db *databasesv1alpha4.Database) []corev1.Toleration {
 
 	return a
 }
+
+func boolPtr(b bool) *bool    { return &b }
+func int64Ptr(i int64) *int64 { return &i }
 
 func (r *ReconcileDatabase) getInstance(request reconcile.Request) (*databasesv1alpha4.Database, error) {
 	instance := &databasesv1alpha4.Database{}
