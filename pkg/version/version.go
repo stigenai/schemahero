@@ -63,12 +63,15 @@ func BuildTime() time.Time {
 	return build.BuildTime
 }
 
-// ManagerImage gets the manager image, defaulting to schemahero/schemahero-manager if not set
+// ManagerImage gets the manager image, defaulting to stigenai/schemahero-manager
+// (stigen fork) if not set. The stigen fork image lives in a private Docker Hub
+// repo; child per-Database controller StatefulSets rely on this default when the
+// HelmRelease does not pass --manager-image explicitly.
 func ManagerImage() string {
 	if managerImage != "" {
 		return managerImage
 	}
-	return "schemahero/schemahero-manager"
+	return "stigenai/schemahero-manager"
 }
 
 // PluginRegistry gets the plugin registry override, empty if not set
