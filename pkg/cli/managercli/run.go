@@ -33,7 +33,7 @@ import (
 // derived from `git describe` at build time and produces tags that were
 // never pushed (e.g. "0.24.0-1-gc6c63c9f"), causing ImagePullBackOff on
 // every per-Database child StatefulSet.
-const defaultManagerTagStigen = "0.22.1-stigen.2"
+const defaultManagerTagStigen = "0.22.1-stigen.3"
 
 func RunCmd() *cobra.Command {
 	cmd := &cobra.Command{
