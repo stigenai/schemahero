@@ -68,7 +68,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler, name string) error {
 	logger.Debugf("adding %s to manager", name)
 
 	// Create a new controller
-	c, err := controller.New("database-controller", mgr, controller.Options{Reconciler: r})
+	c, err := controller.New(name, mgr, controller.Options{Reconciler: r})
 	if err != nil {
 		return err
 	}

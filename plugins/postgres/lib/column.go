@@ -54,7 +54,10 @@ func schemaColumnToColumn(schemaColumn *schemasv1alpha4.PostgresqlTableColumn) (
 		return column, nil
 	}
 
-	return nil, fmt.Errorf("unknown column type. cannot validate column type %q", schemaColumn.Type)
+	// If the type is not a known built-in type, treat it as a user-defined type
+	// (e.g., PostgreSQL ENUM types). Pass it through as-is rather than erroring.
+	column.DataType = requestedType
+	return column, nil
 }
 
 func columnAsInsert(column *schemasv1alpha4.PostgresqlTableColumn) (string, error) {
