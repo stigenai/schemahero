@@ -3,7 +3,6 @@ package managercli
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/go-logr/zapr"
 	"github.com/schemahero/schemahero/pkg/apis"
@@ -26,6 +25,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 )
+
+// defaultManagerTagStigen is the stigen fork image tag used when the
+// HelmRelease does not pass --manager-tag explicitly. It must match an
+// image that has actually been pushed to stigenai/schemahero-manager on
+// Docker Hub. Do NOT replace with version.Version() — that value is
+// derived from `git describe` at build time and produces tags that were
+// never pushed (e.g. "0.24.0-1-gc6c63c9f"), causing ImagePullBackOff on
+// every per-Database child StatefulSet.
+const defaultManagerTagStigen = "0.22.1-stigen.2"
 
 func RunCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -173,19 +181,10 @@ func RunCmd() *cobra.Command {
 	cmd.Flags().Bool("enable-database-controller", false, "when set, the database controller will be active")
 	cmd.Flags().StringSlice("database-name", []string{}, "when present (and not set to *), the controller will reconcile tables and migrations for the specified database")
 	cmd.Flags().String("manager-image", version.ManagerImage(), "the schemahero manager image to use in the controller")
-	cmd.Flags().String("manager-tag", defaultManagerTag(), "the tag of the schemahero manager image to use")
+	cmd.Flags().String("manager-tag", defaultManagerTagStigen, "the tag of the schemahero manager image to use")
 	cmd.Flags().String("plugin-registry", "", "override plugin registry (e.g. ttl.sh/test/plugin)")
 	cmd.Flags().String("plugin-tag", "", "override plugin tag (e.g. dev, staging)")
 	cmd.Flags().String("namespace", "", "when set, limit rbac permissions for watches to this namespace")
 
 	return cmd
-}
-
-func defaultManagerTag() string {
-	tag := version.Version()
-	if strings.HasPrefix(tag, "v") {
-		tag = strings.TrimPrefix(tag, "v")
-	}
-
-	return tag
 }
