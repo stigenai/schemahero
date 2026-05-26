@@ -42,6 +42,8 @@ func Test_ColumnsMatch(t *testing.T) {
 func Test_AlterColumnStatments(t *testing.T) {
 	defaultEleven := "11"
 	defaultEmpty := ""
+	defaultQuotedEnum := "'pending'" // Table-spec embedded-quote convention
+	defaultFunc := "gen_random_uuid()"
 
 	tests := []struct {
 		name               string
@@ -318,6 +320,42 @@ func Test_AlterColumnStatments(t *testing.T) {
 				`update "t" set "a"='11' where "a" is null`,
 				`alter table "t" alter column "a" set not null`,
 			},
+		},
+		{
+			// Regression: an already single-quoted default must not be re-quoted
+			// (was rendered as a doubled quote pair -> SQLSTATE 42601).
+			name:      "quoted string default not double-quoted",
+			tableName: "t",
+			desiredColumns: []*schemasv1alpha4.PostgresqlTableColumn{
+				{
+					Name:    "status",
+					Type:    "text",
+					Default: &defaultQuotedEnum,
+				},
+			},
+			existingColumn: &types.Column{
+				Name:     "status",
+				DataType: "text",
+			},
+			expectedStatements: []string{`alter table "t" alter column "status" set default 'pending'`},
+		},
+		{
+			// Regression: a function-call default must not be wrapped in quotes
+			// (was rendered as 'gen_random_uuid()' -> SQLSTATE 22P02).
+			name:      "function default not quoted",
+			tableName: "t",
+			desiredColumns: []*schemasv1alpha4.PostgresqlTableColumn{
+				{
+					Name:    "id",
+					Type:    "uuid",
+					Default: &defaultFunc,
+				},
+			},
+			existingColumn: &types.Column{
+				Name:     "id",
+				DataType: "uuid",
+			},
+			expectedStatements: []string{`alter table "t" alter column "id" set default gen_random_uuid()`},
 		},
 	}
 
