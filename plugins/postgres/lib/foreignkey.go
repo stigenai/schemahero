@@ -10,11 +10,11 @@ import (
 )
 
 func RemoveForeignKeyStatement(tableName string, foreignKey *types.ForeignKey) string {
-	return fmt.Sprintf("alter table %s drop constraint %s", tableName, pgx.Identifier{foreignKey.Name}.Sanitize())
+	return fmt.Sprintf("alter table %s drop constraint %s", qualifyTableName(tableName), pgx.Identifier{foreignKey.Name}.Sanitize())
 }
 
 func AddForeignKeyStatement(tableName string, schemaForeignKey *schemasv1alpha4.PostgresqlTableForeignKey) string {
-	return fmt.Sprintf("alter table %s add %s", tableName, foreignKeyConstraintClause(tableName, schemaForeignKey))
+	return fmt.Sprintf("alter table %s add %s", qualifyTableName(tableName), foreignKeyConstraintClause(tableName, schemaForeignKey))
 }
 
 func foreignKeyConstraintClause(tableName string, schemaForeignKey *schemasv1alpha4.PostgresqlTableForeignKey) string {
@@ -26,7 +26,7 @@ func foreignKeyConstraintClause(tableName string, schemaForeignKey *schemasv1alp
 	return fmt.Sprintf("constraint %s foreign key (%s) references %s (%s)%s",
 		types.GeneratePostgresqlFKName(tableName, schemaForeignKey),
 		strings.Join(SanitizeArray(schemaForeignKey.Columns), ", "),
-		pgx.Identifier{schemaForeignKey.References.Table}.Sanitize(),
+		sanitizeTableName(schemaForeignKey.References.Table),
 		strings.Join(SanitizeArray(schemaForeignKey.References.Columns), ", "),
 		onDelete)
 }

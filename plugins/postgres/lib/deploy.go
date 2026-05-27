@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/jackc/pgx/v4"
 	"github.com/pkg/errors"
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
 	"github.com/schemahero/schemahero/pkg/database/types"
@@ -62,7 +61,7 @@ func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schema
 		return []string{}, nil
 	} else if tableExists && postgresTableSchema.IsDeleted {
 		return []string{
-			fmt.Sprintf(`drop table %s`, pgx.Identifier{tableName}.Sanitize()),
+			fmt.Sprintf(`drop table %s`, sanitizeTableName(tableName)),
 		}, nil
 	}
 
@@ -177,17 +176,17 @@ func PlanPostgresTableSeedDataOnly(uri string, tableName string, seedData *schem
 			Name: col.Name,
 			Type: col.DataType,
 		}
-		
+
 		if col.Constraints != nil && col.Constraints.NotNull != nil {
 			postgresCol.Constraints = &schemasv1alpha4.PostgresqlTableColumnConstraints{
 				NotNull: col.Constraints.NotNull,
 			}
 		}
-		
+
 		if col.ColumnDefault != nil {
 			postgresCol.Default = col.ColumnDefault
 		}
-		
+
 		postgresSchema.Columns = append(postgresSchema.Columns, postgresCol)
 	}
 
@@ -230,11 +229,17 @@ func executeStatements(p *PostgresConnection, statements []string) error {
 }
 
 func BuildColumnStatements(p *PostgresConnection, tableName string, postgresTableSchema *schemasv1alpha4.PostgresqlTableSchema) ([]string, error) {
+	schema, table := splitQualifiedTableName(tableName)
 	query := `select
 column_name, column_default, is_nullable, data_type, udt_name, character_maximum_length
 from information_schema.columns
 where table_name = $1`
-	rows, err := p.conn.Query(context.Background(), query, tableName)
+	args := []interface{}{table}
+	if schema != "" {
+		query += ` and table_schema = $2`
+		args = append(args, schema)
+	}
+	rows, err := p.conn.Query(context.Background(), query, args...)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to select from information_schema")
 	}
@@ -494,8 +499,14 @@ ExistingIndexLoop:
 
 // CheckIfTableExists returns whether the specified table exists in the database
 func CheckIfTableExists(p *PostgresConnection, tableName string) (bool, error) {
+	schema, table := splitQualifiedTableName(tableName)
 	query := `select count(1) from information_schema.tables where table_name = $1`
-	row := p.conn.QueryRow(context.Background(), query, tableName)
+	args := []interface{}{table}
+	if schema != "" {
+		query += ` and table_schema = $2`
+		args = append(args, schema)
+	}
+	row := p.conn.QueryRow(context.Background(), query, args...)
 	tableExists := 0
 	if err := row.Scan(&tableExists); err != nil {
 		return false, errors.Wrap(err, "failed to scan")

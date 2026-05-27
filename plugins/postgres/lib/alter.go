@@ -48,7 +48,7 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 					if column.ColumnDefault != nil {
 						if existingColumn.ColumnDefault == nil || *existingColumn.ColumnDefault != *column.ColumnDefault {
 							localStatement := fmt.Sprintf("alter table %s alter column %s set default %s",
-								pgx.Identifier{tableName}.Sanitize(),
+								sanitizeTableName(tableName),
 								pgx.Identifier{existingColumn.Name}.Sanitize(),
 								formatColumnDefault(*column.ColumnDefault))
 							statements = append(statements, localStatement)
@@ -58,7 +58,7 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 					// update existing values
 					if column.ColumnDefault != nil {
 						localStatement := fmt.Sprintf("update %s set %s=%s where %s is null",
-							pgx.Identifier{tableName}.Sanitize(),
+							sanitizeTableName(tableName),
 							pgx.Identifier{existingColumn.Name}.Sanitize(),
 							formatColumnDefault(*column.ColumnDefault),
 							pgx.Identifier{existingColumn.Name}.Sanitize())
@@ -67,7 +67,7 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 
 					// set not null
 					localStatement := fmt.Sprintf("alter table %s alter column %s set not null",
-						pgx.Identifier{tableName}.Sanitize(),
+						sanitizeTableName(tableName),
 						pgx.Identifier{existingColumn.Name}.Sanitize())
 					statements = append(statements, localStatement)
 
@@ -117,11 +117,11 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 				return []string{}, nil
 			}
 
-			return []string{fmt.Sprintf(`alter table %s %s`, pgx.Identifier{tableName}.Sanitize(), strings.Join(changes, ", "))}, nil
+			return []string{fmt.Sprintf(`alter table %s %s`, sanitizeTableName(tableName), strings.Join(changes, ", "))}, nil
 		}
 	}
 
-	return []string{fmt.Sprintf(`alter table %s drop column %s`, pgx.Identifier{tableName}.Sanitize(), pgx.Identifier{existingColumn.Name}.Sanitize())}, nil
+	return []string{fmt.Sprintf(`alter table %s drop column %s`, sanitizeTableName(tableName), pgx.Identifier{existingColumn.Name}.Sanitize())}, nil
 }
 
 func columnsMatch(col1 types.Column, col2 types.Column) bool {

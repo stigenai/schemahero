@@ -100,7 +100,7 @@ func InsertColumnStatement(tableName string, desiredColumn *schemasv1alpha4.Post
 		return "", err
 	}
 
-	statement := fmt.Sprintf(`alter table %s add column %s`, pgx.Identifier{tableName}.Sanitize(), columnFields)
+	statement := fmt.Sprintf(`alter table %s add column %s`, sanitizeTableName(tableName), columnFields)
 
 	return statement, nil
 }

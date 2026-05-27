@@ -122,7 +122,7 @@ func CreateTableStatements(tableName string, tableSchema *schemasv1alpha4.Postgr
 	}
 
 	queries := []string{
-		fmt.Sprintf(`create table %s (%s)`, pgx.Identifier{qualifiedTableName}.Sanitize(), strings.Join(columns, ", ")),
+		fmt.Sprintf(`create table %s (%s)`, sanitizeTableName(qualifiedTableName), strings.Join(columns, ", ")),
 	}
 
 	var triggers []*v1alpha4.PostgresqlTableTrigger

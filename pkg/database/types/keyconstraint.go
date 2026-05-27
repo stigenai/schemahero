@@ -37,8 +37,13 @@ func (k *KeyConstraint) GenerateName(tableName string) string {
 	if k.Name != "" {
 		return k.Name
 	}
+	// A constraint name lives in its table's schema and must not itself be
+	// schema-qualified, so derive it from the bare table name (otherwise we
+	// emit e.g. "global.foo_pkey", whose dot is a syntax error in
+	// "add constraint <name> ...").
+	bareName := bareTableName(tableName)
 	if k.IsPrimary {
-		return fmt.Sprintf("%s_pkey", tableName)
+		return fmt.Sprintf("%s_pkey", bareName)
 	}
-	return fmt.Sprintf("%s_%s_key", tableName, strings.Join(k.Columns, "_"))
+	return fmt.Sprintf("%s_%s_key", bareName, strings.Join(k.Columns, "_"))
 }

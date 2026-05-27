@@ -10,7 +10,7 @@ import (
 )
 
 func RemoveConstraintStatement(tableName string, index *types.Index) string {
-	return fmt.Sprintf("alter table %s drop constraint %s", pgx.Identifier{tableName}.Sanitize(), pgx.Identifier{index.Name}.Sanitize())
+	return fmt.Sprintf("alter table %s drop constraint %s", sanitizeTableName(tableName), pgx.Identifier{index.Name}.Sanitize())
 }
 
 func RemoveIndexStatement(tableName string, index *types.Index) string {
@@ -34,7 +34,7 @@ func AddIndexStatement(tableName string, schemaIndex *schemasv1alpha4.Postgresql
 	statement := fmt.Sprintf("create %sindex %s on %s (%s)",
 		unique,
 		name,
-		tableName,
+		qualifyTableName(tableName),
 		strings.Join(schemaIndex.Columns, ", "))
 
 	if schemaIndex.With != nil && len(schemaIndex.With) > 0 {
