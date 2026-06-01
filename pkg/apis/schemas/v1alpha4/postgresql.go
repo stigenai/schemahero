@@ -195,6 +195,9 @@ type PostgresqlFunctionSchema struct {
 	// END;
 	// ```
 	As string `json:"as" yaml:"as"`
+	// SecurityDefiner runs the function with the privileges of its owner
+	// (SECURITY DEFINER) rather than the caller (the default, SECURITY INVOKER).
+	SecurityDefiner bool `json:"securityDefiner,omitempty" yaml:"securityDefiner,omitempty"`
 	// Aliases for compatibility
 	Body     string `json:"-" yaml:"-"`
 	Returns  string `json:"-" yaml:"-"`

@@ -1,4 +1,4 @@
-create or replace function test.get_user_count() returns bigint as
+create or replace function test.get_user_count() returns bigint security definer as
 $_SCHEMAHERO_$
 DECLARE
     user_count bigint;

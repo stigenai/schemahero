@@ -56,6 +56,7 @@ build-postgres-plugin:
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-function run
+	make -C function-replace run
 	make -C create-table run
 	make -C create-table-with-index run
 	make -C drop-table run
@@ -95,6 +96,7 @@ build-postgres-plugin:
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-function run
+	make -C function-replace run
 	make -C create-table run
 	make -C create-table-with-index run
 	make -C drop-table run
@@ -134,6 +136,7 @@ build-postgres-plugin:
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-function run
+	make -C function-replace run
 	make -C create-table run
 	make -C create-table-with-index run
 	make -C drop-table run
@@ -173,6 +176,7 @@ build-postgres-plugin:
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-function run
+	make -C function-replace run
 	make -C create-table run
 	make -C create-table-with-index run
 	make -C drop-table run

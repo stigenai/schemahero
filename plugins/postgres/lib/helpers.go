@@ -180,6 +180,42 @@ func getQualifiedExecuteName(functionName, schema string, params []*schemasv1alp
 	return fmt.Sprintf("%s(%s)", qualifiedFunctionName, serializeExecuteParams(params))
 }
 
+// getFunctionSignature builds a Postgres function-identity signature suitable
+// for to_regprocedure(), e.g. "schema.name(text, integer)".
+//
+// A function's identity is (schema, name, input-argument types) ONLY: OUT
+// params are NOT part of the signature, and neither names nor modes are. This
+// is deliberately distinct from serializeExecuteParams (which emits mode+name+type
+// for CREATE and is reused by trigger.go) — passing the full serialization here
+// would build an invalid signature and silently miss the function, causing a
+// second CREATE instead of a REPLACE.
+//
+// The name is left unquoted so to_regprocedure parses it search_path-aware (an
+// unqualified name resolves via search_path; a qualified "schema.name" is exact).
+// The corpus uses lowercase identifiers, for which this is correct.
+func getFunctionSignature(functionName, schema string, params []*schemasv1alpha4.PostgresqlExecuteParameter) string {
+	qualifiedFunctionName := functionName
+	if schema != "" && schema != "public" {
+		qualifiedFunctionName = fmt.Sprintf("%s.%s", schema, functionName)
+	}
+	return fmt.Sprintf("%s(%s)", qualifiedFunctionName, signatureArgTypes(params))
+}
+
+// signatureArgTypes serializes ONLY the input-argument types (IN, INOUT,
+// VARIADIC) of a function, comma-separated and without names or modes, e.g.
+// "text, integer". OUT params are excluded because they are not part of the
+// function's identity.
+func signatureArgTypes(params []*schemasv1alpha4.PostgresqlExecuteParameter) string {
+	ts := []string{}
+	for _, param := range params {
+		if strings.EqualFold(param.Mode, "OUT") {
+			continue
+		}
+		ts = append(ts, param.Type)
+	}
+	return strings.Join(ts, ", ")
+}
+
 // serializeExecuteParams serializes parameters so that they can be used when sending instructions to Postgres
 func serializeExecuteParams(params []*schemasv1alpha4.PostgresqlExecuteParameter) string {
 	ps := []string{}

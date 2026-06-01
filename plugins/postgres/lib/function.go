@@ -28,7 +28,11 @@ const FunctionLogicTag = "$_SCHEMAHERO_$"
 func CreateFunctionStatements(functionName string, functionSchema *schemasv1alpha4.PostgresqlFunctionSchema) []string {
 	qualifiedFunctionName := getQualifiedExecuteName(functionName, functionSchema.Schema, functionSchema.Params)
 
-	statement := fmt.Sprintf("create function %s", qualifiedFunctionName)
+	// "create or replace" makes a second apply idempotent: re-running the
+	// generated migration replaces the function in place instead of erroring
+	// with 42723 (function already exists). This mirrors how CreateExtensionStatements
+	// always emits "if not exists".
+	statement := fmt.Sprintf("create or replace function %s", qualifiedFunctionName)
 
 	if functionSchema.Return != "" {
 		statement = fmt.Sprintf("%s returns", statement)
@@ -36,6 +40,13 @@ func CreateFunctionStatements(functionName string, functionSchema *schemasv1alph
 			statement = fmt.Sprintf("%s setof", statement)
 		}
 		statement = fmt.Sprintf("%s %s", statement, functionSchema.Return)
+	}
+
+	// SECURITY DEFINER is a function attribute; Postgres accepts it before the
+	// AS/LANGUAGE body block. Placed right after the return clause it is
+	// unambiguous and keeps LANGUAGE last (as the existing tests pin).
+	if functionSchema.SecurityDefiner {
+		statement = fmt.Sprintf("%s security definer", statement)
 	}
 
 	statements := []string{
@@ -50,7 +61,11 @@ func DropFunctionStatements(functionName string, functionSchema *schemasv1alpha4
 	qualifiedFunctionName := getQualifiedExecuteName(functionName, functionSchema.Schema, functionSchema.Params)
 
 	statements := []string{
-		fmt.Sprintf("drop function %s", qualifiedFunctionName),
+		// "if exists" guards against a finalizer/plan re-run where the function
+		// is already gone. No CASCADE (default RESTRICT): a drop that would orphan
+		// a dependent (e.g. a trigger) FAILS loudly rather than silently dropping
+		// dependent objects.
+		fmt.Sprintf("drop function if exists %s", qualifiedFunctionName),
 	}
 
 	return statements
