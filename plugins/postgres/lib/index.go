@@ -14,11 +14,12 @@ func RemoveConstraintStatement(tableName string, index *types.Index) string {
 	return fmt.Sprintf("alter table %s drop constraint %s", sanitizeTableName(tableName), pgx.Identifier{index.Name}.Sanitize())
 }
 
+// RemoveIndexStatement emits a guarded DROP INDEX for any index (unique or not).
+// IF EXISTS is ALWAYS present so a re-run, a partial prior apply that already
+// dropped the index, or a concurrent reconcile cannot wedge the plan with a 42704
+// "index does not exist". DROP INDEX removes only the index, never table data.
 func RemoveIndexStatement(tableName string, index *types.Index) string {
-	if index.IsUnique {
-		return fmt.Sprintf("drop index if exists %s", pgx.Identifier{index.Name}.Sanitize())
-	}
-	return fmt.Sprintf("drop index %s", pgx.Identifier{index.Name}.Sanitize())
+	return fmt.Sprintf("drop index if exists %s", pgx.Identifier{index.Name}.Sanitize())
 }
 
 func AddIndexStatement(tableName string, schemaIndex *schemasv1alpha4.PostgresqlTableIndex) string {

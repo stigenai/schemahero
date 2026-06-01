@@ -4,9 +4,22 @@ import (
 	"testing"
 
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
+	"github.com/schemahero/schemahero/pkg/database/types"
 
 	"github.com/stretchr/testify/assert"
 )
+
+// Test_RemoveIndexStatement_alwaysIfExists is the MEDIUM-1 regression: a DROP
+// INDEX must ALWAYS carry IF EXISTS, for BOTH unique and non-unique indexes, so a
+// re-run / partial prior apply / concurrent reconcile cannot wedge the plan with a
+// 42704 "index does not exist". Previously only the unique branch was guarded.
+func Test_RemoveIndexStatement_alwaysIfExists(t *testing.T) {
+	unique := RemoveIndexStatement("users", &types.Index{Name: "idx_users_email", IsUnique: true})
+	assert.Equal(t, `drop index if exists "idx_users_email"`, unique)
+
+	nonUnique := RemoveIndexStatement("users", &types.Index{Name: "idx_users_created", IsUnique: false})
+	assert.Equal(t, `drop index if exists "idx_users_created"`, nonUnique)
+}
 
 func Test_AddIndexStatement(t *testing.T) {
 	tests := []struct {
