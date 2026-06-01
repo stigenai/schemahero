@@ -100,7 +100,11 @@ func CreateTableStatements(tableName string, tableSchema *schemasv1alpha4.Postgr
 
 	if len(tableSchema.Indexes) > 0 {
 		for _, index := range tableSchema.Indexes {
-			if index.IsUnique {
+			// Only a plain, total, btree unique index can be folded into an inline
+			// UNIQUE constraint. Extended unique indexes (method/partial/expression/
+			// ordered) are left for BuildIndexStatements to emit as standalone
+			// CREATE UNIQUE INDEX statements.
+			if isInlineFoldableUniqueIndex(index) {
 				uniqueColumns := []string{}
 				for _, indexColumn := range index.Columns {
 					uniqueColumns = append(uniqueColumns, pgx.Identifier{indexColumn}.Sanitize())

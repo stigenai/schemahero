@@ -53,11 +53,27 @@ type PostgresqlTableForeignKey struct {
 }
 
 type PostgresqlTableIndex struct {
-	Columns  []string          `json:"columns" yaml:"columns"`
-	Name     string            `json:"name,omitempty" yaml:"name,omitempty"`
-	IsUnique bool              `json:"isUnique,omitempty" yaml:"isUnique,omitempty"`
-	Type     string            `json:"type,omitempty" yaml:"type,omitempty"`
-	With     map[string]string `json:"with,omitempty" yaml:"with,omitempty"`
+	Columns  []string `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Name     string   `json:"name,omitempty" yaml:"name,omitempty"`
+	IsUnique bool     `json:"isUnique,omitempty" yaml:"isUnique,omitempty"`
+	// Type is the index method (access method): btree (default) | hash | gin | gist | brin | spgist.
+	Type string `json:"type,omitempty" yaml:"type,omitempty"`
+	// With holds index storage parameters, e.g. {fillfactor: "70"}.
+	With map[string]string `json:"with,omitempty" yaml:"with,omitempty"`
+	// Where is a partial-index predicate (raw SQL, without the WHERE keyword), e.g. "phone <> ''".
+	Where string `json:"where,omitempty" yaml:"where,omitempty"`
+	// Expressions are functional-index column expressions (raw SQL), e.g. ["lower(email)"].
+	Expressions []string `json:"expressions,omitempty" yaml:"expressions,omitempty"`
+	// SortedColumns are index columns with explicit ordering (ASC/DESC, NULLS FIRST/LAST).
+	SortedColumns []*PostgresqlTableIndexColumn `json:"sortedColumns,omitempty" yaml:"sortedColumns,omitempty"`
+}
+
+type PostgresqlTableIndexColumn struct {
+	Column string `json:"column" yaml:"column"`
+	//+kubebuilder:validation:Enum=ASC;DESC
+	Sort string `json:"sort,omitempty" yaml:"sort,omitempty"`
+	//+kubebuilder:validation:Enum=FIRST;LAST
+	Nulls string `json:"nulls,omitempty" yaml:"nulls,omitempty"`
 }
 
 type PostgresqlTableColumnConstraints struct {

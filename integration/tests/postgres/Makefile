@@ -28,6 +28,8 @@ build-postgres-plugin:
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run
@@ -59,6 +61,8 @@ build-postgres-plugin:
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run
@@ -90,6 +94,8 @@ build-postgres-plugin:
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run
@@ -121,6 +127,8 @@ build-postgres-plugin:
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run
@@ -152,6 +160,8 @@ build-postgres-plugin:
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run

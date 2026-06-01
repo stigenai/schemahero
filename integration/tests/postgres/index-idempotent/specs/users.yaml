@@ -1,0 +1,47 @@
+database: schemahero
+name: users
+requires: []
+schema:
+  postgres:
+    primaryKey: [id]
+    indexes:
+      # Same five extended indexes as the fixtures, declared via the API fields.
+      # The WHERE predicate and the expression body use PostgreSQL's canonical
+      # text so the diff is a no-op (proving Equals normalization, btree-default
+      # handling, and ordered/expression comparison do not spuriously churn).
+      - name: idx_users_email_partial
+        columns: [email]
+        isUnique: true
+        where: "((phone)::text <> ''::text)"
+      - name: idx_users_lower_email
+        expressions: ["lower((email)::text)"]
+      - name: idx_users_phone_hash
+        columns: [phone]
+        type: hash
+      - name: idx_users_data_gin
+        columns: [data]
+        type: gin
+      - name: idx_users_created_id
+        sortedColumns:
+          - column: created_at
+            sort: DESC
+          - column: id
+    columns:
+      - name: id
+        type: integer
+      - name: email
+        type: varchar(255)
+        constraints:
+          notNull: true
+      - name: phone
+        type: varchar(10)
+        constraints:
+          notNull: true
+        default: ""
+      - name: created_at
+        type: timestamptz
+        constraints:
+          notNull: true
+        default: now()
+      - name: data
+        type: jsonb

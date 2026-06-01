@@ -1,0 +1,49 @@
+database: schemahero
+name: users
+requires: []
+schema:
+  postgres:
+    primaryKey: [id]
+    indexes:
+      # partial unique index (WHERE predicate) — cannot be an inline UNIQUE
+      # constraint, so it is emitted as a standalone CREATE UNIQUE INDEX.
+      - name: idx_users_email_partial
+        columns: [email]
+        isUnique: true
+        where: "phone <> ''"
+      # functional / expression index
+      - name: idx_users_lower_email
+        expressions: ["lower(email)"]
+      # index method hash (scalar-safe proof that USING is wired)
+      - name: idx_users_phone_hash
+        columns: [phone]
+        type: hash
+      # index method gin on a jsonb column (the real GIN target)
+      - name: idx_users_data_gin
+        columns: [data]
+        type: gin
+      # per-column ordering (DESC + default ASC)
+      - name: idx_users_created_id
+        sortedColumns:
+          - column: created_at
+            sort: DESC
+          - column: id
+    columns:
+      - name: id
+        type: integer
+      - name: email
+        type: varchar(255)
+        constraints:
+          notNull: true
+      - name: phone
+        type: varchar(10)
+        constraints:
+          notNull: true
+        default: ""
+      - name: created_at
+        type: timestamptz
+        constraints:
+          notNull: true
+        default: now()
+      - name: data
+        type: jsonb

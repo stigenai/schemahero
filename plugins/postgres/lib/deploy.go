@@ -419,8 +419,11 @@ func BuildIndexStatements(p *PostgresConnection, tableName string, postgresTable
 
 DesiredIndexLoop:
 	for _, index := range postgresTableSchema.Indexes {
-		// Skip unique indexes for new tables as they're already added as constraints in CREATE TABLE
-		if !tableExists && index.IsUnique {
+		// Skip unique indexes for new tables as they're already added as inline
+		// UNIQUE constraints in CREATE TABLE. Extended unique indexes (method,
+		// partial, expression, or ordered) cannot be inline constraints and so are
+		// NOT skipped here; they are emitted as standalone CREATE UNIQUE INDEX.
+		if !tableExists && isInlineFoldableUniqueIndex(index) {
 			continue
 		}
 

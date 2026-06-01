@@ -22,6 +22,7 @@ import (
 
 	"github.com/jackc/pgx/v4"
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
+	"github.com/schemahero/schemahero/pkg/database/types"
 )
 
 // splitQualifiedTableName splits a possibly schema-qualified table reference
@@ -55,6 +56,119 @@ func qualifyTableName(tableName string) string {
 		return pgx.Identifier{schema, table}.Sanitize()
 	}
 	return tableName
+}
+
+// parseIndexElements extracts ordered columns and functional expressions from a
+// canonical `pg_get_indexdef` string. The pretty per-column array that
+// ListTableIndexes also fetches drops ASC/DESC/NULLS ordering and cannot
+// represent an expression, so the richer fields are recovered here.
+//
+// It returns non-empty results ONLY when the index uses ordering or an
+// expression; a plain index (e.g. "... (email)") yields (nil, nil) so it
+// continues to compare via the bare Columns set and does not spuriously churn.
+func parseIndexElements(indexDef string) ([]types.IndexColumn, []string) {
+	body := extractIndexElementList(indexDef)
+	if body == "" {
+		return nil, nil
+	}
+
+	rawElements := splitTopLevelCommas(body)
+
+	hasRich := false
+	for _, raw := range rawElements {
+		e := strings.TrimSpace(raw)
+		if strings.Contains(e, "(") || strings.ContainsAny(e, " \t") {
+			hasRich = true
+			break
+		}
+	}
+	if !hasRich {
+		return nil, nil
+	}
+
+	var sortedColumns []types.IndexColumn
+	var expressions []string
+	for _, raw := range rawElements {
+		e := strings.TrimSpace(raw)
+		if strings.Contains(e, "(") {
+			// An expression element. pg renders it parenthesised, e.g.
+			// "lower((email)::text)"; trailing ASC/DESC/NULLS are dropped for the
+			// expression-equality compare (best-effort, kept simple for v1).
+			expressions = append(expressions, e)
+			continue
+		}
+		sortedColumns = append(sortedColumns, parseSortedColumnElement(e))
+	}
+
+	return sortedColumns, expressions
+}
+
+// extractIndexElementList returns the substring of a canonical index definition
+// between the outermost parentheses of the column list (the first balanced
+// "(...)" group), ignoring anything after it such as " WHERE ...".
+func extractIndexElementList(indexDef string) string {
+	start := strings.Index(indexDef, "(")
+	if start < 0 {
+		return ""
+	}
+
+	depth := 0
+	for i := start; i < len(indexDef); i++ {
+		switch indexDef[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return indexDef[start+1 : i]
+			}
+		}
+	}
+	return ""
+}
+
+// splitTopLevelCommas splits on commas that are not nested inside parentheses.
+func splitTopLevelCommas(s string) []string {
+	var parts []string
+	depth := 0
+	last := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, s[last:i])
+				last = i + 1
+			}
+		}
+	}
+	parts = append(parts, s[last:])
+	return parts
+}
+
+// parseSortedColumnElement parses a bare column element with optional ordering,
+// e.g. "created_at DESC", "email NULLS FIRST", "name DESC NULLS LAST".
+func parseSortedColumnElement(element string) types.IndexColumn {
+	fields := strings.Fields(element)
+	col := types.IndexColumn{}
+	if len(fields) > 0 {
+		col.Column = fields[0]
+	}
+	upper := strings.ToUpper(element)
+	if strings.Contains(upper, " DESC") {
+		col.Sort = "DESC"
+	} else if strings.Contains(upper, " ASC") {
+		col.Sort = "ASC"
+	}
+	if strings.Contains(upper, "NULLS FIRST") {
+		col.Nulls = "FIRST"
+	} else if strings.Contains(upper, "NULLS LAST") {
+		col.Nulls = "LAST"
+	}
+	return col
 }
 
 // getQualifiedExecuteName creates an execute name that can be used to uniquely identity an executable (function or procedure)

@@ -96,6 +96,10 @@ func (p *PostgresConnection) ListTableIndexes(databaseName string, tableName str
 	}
 
 	// started with this: https://stackoverflow.com/questions/6777456/list-all-index-names-column-names-and-its-table-name-of-a-postgresql-database
+	// indpred (partial predicate) and the full canonical index definition are
+	// captured so partial / ordered / expression indexes round-trip; the pretty
+	// per-column array (3rd arg true) drops ordering, so ordering/expressions are
+	// parsed from indexdef instead.
 	query := `select
 	i.relname as indname,
 	am.amname as indam,
@@ -105,7 +109,9 @@ func (p *PostgresConnection) ListTableIndexes(databaseName string, tableName str
 	  from generate_subscripts(idx.indkey, 1) as k
 	  order by k
 	) as indkey_names,
-	 i.reloptions as reloptions
+	 i.reloptions as reloptions,
+	 pg_get_expr(idx.indpred, idx.indrelid) as indpred,
+	 pg_get_indexdef(idx.indexrelid) as indexdef
 	from pg_index as idx
 	join pg_class as i on i.oid = idx.indexrelid
 	join pg_am as am on i.relam = am.oid
@@ -123,12 +129,32 @@ func (p *PostgresConnection) ListTableIndexes(databaseName string, tableName str
 		var method string
 		var columns []string
 		var reloptions map[string]string
-		if err := rows.Scan(&index.Name, &method, &index.IsUnique, &columns, &reloptions); err != nil {
+		var indpred sql.NullString
+		var indexdef string
+		if err := rows.Scan(&index.Name, &method, &index.IsUnique, &columns, &reloptions, &indpred, &indexdef); err != nil {
 			return nil, err
 		}
 
 		index.Columns = columns
 		index.With = reloptions
+
+		// Normalize the access method: store "" for the btree default so a spec
+		// that omits the method matches an introspected btree index (no churn).
+		if strings.ToLower(method) != "btree" {
+			index.Type = method
+		}
+
+		if indpred.Valid {
+			index.Where = indpred.String
+		}
+
+		// Parse ordering/expressions from the canonical definition. The pretty
+		// per-column array above already gives bare names (kept in index.Columns);
+		// only populate the richer fields when the index actually uses ordering or
+		// an expression, so a plain index compares byte-identically to before.
+		sortedColumns, expressions := parseIndexElements(indexdef)
+		index.SortedColumns = sortedColumns
+		index.Expressions = expressions
 
 		indexes = append(indexes, &index)
 	}

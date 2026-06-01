@@ -195,14 +195,51 @@ spec:
                               items:
                                 type: string
                               type: array
+                            expressions:
+                              description: Expressions are functional-index column
+                                expressions (raw SQL), e.g. ["lower(email)"].
+                              items:
+                                type: string
+                              type: array
                             isUnique:
                               type: boolean
                             name:
                               type: string
+                            sortedColumns:
+                              description: SortedColumns are index columns with explicit
+                                ordering (ASC/DESC, NULLS FIRST/LAST).
+                              items:
+                                properties:
+                                  column:
+                                    type: string
+                                  nulls:
+                                    enum:
+                                    - FIRST
+                                    - LAST
+                                    type: string
+                                  sort:
+                                    enum:
+                                    - ASC
+                                    - DESC
+                                    type: string
+                                required:
+                                - column
+                                type: object
+                              type: array
                             type:
+                              description: 'Type is the index method (access method):
+                                btree (default) | hash | gin | gist | brin | spgist.'
                               type: string
-                          required:
-                          - columns
+                            where:
+                              description: Where is a partial-index predicate (raw
+                                SQL, without the WHERE keyword), e.g. "phone <> ''".
+                              type: string
+                            with:
+                              additionalProperties:
+                                type: string
+                              description: 'With holds index storage parameters, e.g.
+                                {fillfactor: "70"}.'
+                              type: object
                           type: object
                         type: array
                       isDeleted:
@@ -497,14 +534,51 @@ spec:
                               items:
                                 type: string
                               type: array
+                            expressions:
+                              description: Expressions are functional-index column
+                                expressions (raw SQL), e.g. ["lower(email)"].
+                              items:
+                                type: string
+                              type: array
                             isUnique:
                               type: boolean
                             name:
                               type: string
+                            sortedColumns:
+                              description: SortedColumns are index columns with explicit
+                                ordering (ASC/DESC, NULLS FIRST/LAST).
+                              items:
+                                properties:
+                                  column:
+                                    type: string
+                                  nulls:
+                                    enum:
+                                    - FIRST
+                                    - LAST
+                                    type: string
+                                  sort:
+                                    enum:
+                                    - ASC
+                                    - DESC
+                                    type: string
+                                required:
+                                - column
+                                type: object
+                              type: array
                             type:
+                              description: 'Type is the index method (access method):
+                                btree (default) | hash | gin | gist | brin | spgist.'
                               type: string
-                          required:
-                          - columns
+                            where:
+                              description: Where is a partial-index predicate (raw
+                                SQL, without the WHERE keyword), e.g. "phone <> ''".
+                              type: string
+                            with:
+                              additionalProperties:
+                                type: string
+                              description: 'With holds index storage parameters, e.g.
+                                {fillfactor: "70"}.'
+                              type: object
                           type: object
                         type: array
                       isDeleted:
@@ -921,14 +995,51 @@ spec:
                               items:
                                 type: string
                               type: array
+                            expressions:
+                              description: Expressions are functional-index column
+                                expressions (raw SQL), e.g. ["lower(email)"].
+                              items:
+                                type: string
+                              type: array
                             isUnique:
                               type: boolean
                             name:
                               type: string
+                            sortedColumns:
+                              description: SortedColumns are index columns with explicit
+                                ordering (ASC/DESC, NULLS FIRST/LAST).
+                              items:
+                                properties:
+                                  column:
+                                    type: string
+                                  nulls:
+                                    enum:
+                                    - FIRST
+                                    - LAST
+                                    type: string
+                                  sort:
+                                    enum:
+                                    - ASC
+                                    - DESC
+                                    type: string
+                                required:
+                                - column
+                                type: object
+                              type: array
                             type:
+                              description: 'Type is the index method (access method):
+                                btree (default) | hash | gin | gist | brin | spgist.'
                               type: string
-                          required:
-                          - columns
+                            where:
+                              description: Where is a partial-index predicate (raw
+                                SQL, without the WHERE keyword), e.g. "phone <> ''".
+                              type: string
+                            with:
+                              additionalProperties:
+                                type: string
+                              description: 'With holds index storage parameters, e.g.
+                                {fillfactor: "70"}.'
+                              type: object
                           type: object
                         type: array
                       isDeleted:
