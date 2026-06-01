@@ -1,0 +1,110 @@
+package types
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
+// Test_CanonicalizeSQLExpr_naturalEqualsCanonical is the unit-level proof behind
+// the HIGH-2 fix: a fragment authored in NATURAL form must canonicalize to the
+// SAME string PostgreSQL renders back via pg_get_expr / pg_get_constraintdef. If
+// these did not match, an expression/partial index or EXCLUDE predicate would
+// drop+recreate on every plan.
+func Test_CanonicalizeSQLExpr_naturalEqualsCanonical(t *testing.T) {
+	tests := []struct {
+		name      string
+		natural   string // as a human would author it in a spec
+		canonical string // as pg_get_expr / pg_get_constraintdef renders it back
+	}{
+		{
+			name:      "partial-index predicate with empty-string comparison",
+			natural:   "phone <> ''",
+			canonical: "((phone)::text <> ''::text)",
+		},
+		{
+			name:      "functional-index expression lower(col)",
+			natural:   "lower(email)",
+			canonical: "lower((email)::text)",
+		},
+		{
+			name:      "EXCLUDE predicate IS NOT NULL gains wrapping parens",
+			natural:   "room_id is not null",
+			canonical: "(room_id IS NOT NULL)",
+		},
+		{
+			name:      "numeric comparison gains a ::numeric cast",
+			natural:   "amount > 0",
+			canonical: "(amount > (0)::numeric)",
+		},
+		{
+			name:      "varchar comparison gains ::text casts on both sides",
+			natural:   "status = 'a'",
+			canonical: "((status)::text = 'a'::character varying)",
+		},
+		{
+			// PostgreSQL quotes a negative numeric literal before casting it
+			// ("-273" -> "'-273'::integer"). A user writes it unquoted, so the
+			// canonicalizer must unquote the cast literal or a CHECK/index/EXCLUDE
+			// using a negative number would churn on every plan.
+			name:      "negative numeric literal quoted+cast by postgres",
+			natural:   "temperature >= -273",
+			canonical: "(temperature >= '-273'::integer)",
+		},
+		{
+			name:      "decimal numeric literal quoted+cast by postgres",
+			natural:   "rate <= 99.5",
+			canonical: "(rate <= '99.5'::numeric)",
+		},
+		{
+			// pg_get_constraintdef(oid, true) (pretty) renders the cast WITHOUT
+			// wrapping parens, so an "::integer" is immediately followed by "AND".
+			// The cast skipper must stop at "and" (not swallow "and temperature ...")
+			// or the whole tail of the predicate is eaten and the CHECK churns.
+			name:      "unparenthesized cast followed by AND (pretty pg_get_constraintdef)",
+			natural:   "temperature_celsius >= -273 and temperature_celsius <= 1000000",
+			canonical: "temperature_celsius >= '-273'::integer AND temperature_celsius <= 1000000",
+		},
+		{
+			// Multi-word type after an unparenthesized cast must still be consumed
+			// fully ("character varying"), then stop at the operator.
+			name:      "unparenthesized character varying cast followed by operator",
+			natural:   "name = 'x' and id > 0",
+			canonical: "(name)::text = 'x'::character varying and id > 0",
+		},
+		{
+			name:      "case-insensitive boolean operators",
+			natural:   "a AND b",
+			canonical: "(a and b)",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t,
+				CanonicalizeSQLExpr(test.natural),
+				CanonicalizeSQLExpr(test.canonical),
+				"natural and canonical forms must canonicalize equal (else churn every plan)",
+			)
+		})
+	}
+}
+
+// Test_CanonicalizeSQLExpr_distinguishesDifferent guards against the opposite
+// failure: two genuinely different expressions must NOT collapse to the same
+// canonical form, or a real change would be missed and never applied.
+func Test_CanonicalizeSQLExpr_distinguishesDifferent(t *testing.T) {
+	assert.NotEqual(t, CanonicalizeSQLExpr("phone <> ''"), CanonicalizeSQLExpr("email <> ''"))
+	assert.NotEqual(t, CanonicalizeSQLExpr("amount > 0"), CanonicalizeSQLExpr("amount >= 0"))
+	assert.NotEqual(t, CanonicalizeSQLExpr("lower(email)"), CanonicalizeSQLExpr("upper(email)"))
+
+	// A STRING literal that happens to look numeric must NOT be unquoted: PostgreSQL
+	// renders "status = '5'" (text column) as "(status)::text = '5'::text", and that
+	// must stay distinct from a numeric "count = 5" / "count = 5::integer". Only
+	// numeric-typed cast literals are unquoted, so the text '5' keeps its quotes.
+	textFive := CanonicalizeSQLExpr("(status)::text = '5'::text")
+	intFive := CanonicalizeSQLExpr("count = 5")
+	assert.NotEqual(t, textFive, intFive)
+	assert.Equal(t, CanonicalizeSQLExpr("status = '5'"), textFive,
+		"a string literal '5' must round-trip unchanged (quotes preserved)")
+}

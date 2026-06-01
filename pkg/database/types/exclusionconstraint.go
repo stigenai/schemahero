@@ -54,14 +54,18 @@ func normalizeUsing(using string) string {
 	return m
 }
 
-// normalizeExclElement lowercases and collapses internal whitespace so two
-// equivalent element fragments compare equal even when spacing/case differs.
-// This is best-effort and deliberately conservative (it does not strip parens or
-// casts); an element whose text is not already in PostgreSQL's canonical form may
-// still re-churn (a guarded, non data-losing drop+recreate), matching the
-// accepted behavior for partial-index predicates and column defaults elsewhere.
+// normalizeExclElement canonicalizes an EXCLUDE element / predicate / operator
+// fragment via the shared CanonicalizeSQLExpr (lowercase, strip "::type" casts,
+// drop all parentheses, collapse whitespace) — the SAME canonicalization the CHECK
+// and index comparators use. This is load-bearing: pg_get_constraintdef renders an
+// EXCLUDE's elements and WHERE predicate in PostgreSQL's canonical form (e.g. a
+// bare "room_id is not null" predicate comes back as "(room_id IS NOT NULL)", and
+// an expression element gains casts/parens), so a constraint authored in natural
+// form would otherwise differ on every plan and force a guarded drop+recreate of
+// the constraint and its backing index. Operators (= , &&) carry no parens/casts,
+// so canonicalizing them is a harmless lowercase/whitespace collapse.
 func normalizeExclElement(s string) string {
-	return strings.Join(strings.Fields(strings.ToLower(s)), " ")
+	return CanonicalizeSQLExpr(s)
 }
 
 func (e *ExclusionConstraint) Equals(other *ExclusionConstraint) bool {
@@ -148,5 +152,5 @@ func GeneratePostgresqlExclusionConstraintName(tableName string, c *schemasv1alp
 		fragments = append(fragments, sanitizeIdentFragment(element))
 	}
 
-	return fmt.Sprintf("%s_%s_excl", bareTableName(tableName), strings.Join(fragments, "_"))
+	return capPostgresIdentifier(fmt.Sprintf("%s_%s_excl", bareTableName(tableName), strings.Join(fragments, "_")))
 }

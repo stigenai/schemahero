@@ -129,6 +129,33 @@ func TestExclusionConstraint_Equals(t *testing.T) {
 			expected: false,
 		},
 		{
+			// HIGH-2 regression: a natural WHERE predicate must equal the canonical
+			// text pg_get_constraintdef renders back (IS NOT NULL gains wrapping
+			// parens), or the EXCLUDE constraint drops+recreates on every plan.
+			name: "natural WHERE predicate equals canonical (parenthesized) form",
+			exclusion: &ExclusionConstraint{
+				Items: []ExclusionConstraintItem{{Column: "room_id", Operator: "="}},
+				Where: "room_id is not null",
+			},
+			other: &ExclusionConstraint{
+				Items: []ExclusionConstraintItem{{Column: "room_id", Operator: "="}},
+				Where: "(room_id IS NOT NULL)",
+			},
+			expected: true,
+		},
+		{
+			// HIGH-2 regression: an expression element authored in natural form must
+			// equal the canonical rendered element (casts/parens added).
+			name: "natural expression element equals canonical form",
+			exclusion: &ExclusionConstraint{
+				Items: []ExclusionConstraintItem{{Expression: "lower(name)", Operator: "="}},
+			},
+			other: &ExclusionConstraint{
+				Items: []ExclusionConstraintItem{{Expression: "lower((name)::text)", Operator: "="}},
+			},
+			expected: true,
+		},
+		{
 			name: "explicit names that differ do not match",
 			exclusion: &ExclusionConstraint{
 				Name:  "a",

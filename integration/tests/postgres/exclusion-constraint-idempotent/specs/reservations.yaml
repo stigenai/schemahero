@@ -16,7 +16,19 @@ schema:
         type: daterange
         constraints:
           notNull: true
+      - name: code
+        type: varchar(10)
+        constraints:
+          notNull: true
+        default: ""
     exclusionConstraints:
+      # The WHERE predicate is written in NATURAL (human) form. pg_get_constraintdef
+      # renders it back canonically as "((code)::text <> ''::text)"; the parser
+      # strips only the OUTER paren pair, leaving the inner "(code)::text" parens
+      # and the "::text" casts. The comparator must therefore canonicalize both
+      # sides (strip casts + redundant parens) to see them as equal and emit ZERO
+      # DDL — the regression for HIGH-2 (a natural-form EXCLUDE predicate must not
+      # drop+recreate the constraint on every plan).
       - name: reservations_room_during_excl
         using: gist
         items:
@@ -24,4 +36,4 @@ schema:
             operator: "="
           - column: during
             operator: "&&"
-        where: room_id is not null
+        where: code <> ''

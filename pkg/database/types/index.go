@@ -41,14 +41,18 @@ func normalizeIndexMethod(method string) string {
 	return m
 }
 
-// normalizeSQLFragment lower-cases and collapses internal whitespace so two
-// equivalent raw-SQL fragments (predicates, expressions) compare equal even
-// when spacing/case differs. This is best-effort: a predicate whose text is not
-// already in Postgres' canonical form may still re-churn (a guarded, non
-// data-losing drop+recreate), matching the accepted behavior for column
-// defaults elsewhere in this plugin.
+// normalizeSQLFragment canonicalizes a raw-SQL fragment (partial-index predicate
+// or functional-index expression) for comparison via the shared CanonicalizeSQLExpr:
+// lowercase, strip "::type" casts, drop all parentheses, collapse whitespace. This
+// is the SAME canonicalization the CHECK comparator uses, and it is load-bearing:
+// PostgreSQL stores/renders these fragments in canonical form (pg_get_expr turns
+// "lower(email)" into "lower((email)::text)", and a comparison to an empty string
+// literal gains "(phone)::text" / "::text" casts), so a fragment authored in
+// natural form would otherwise differ on every plan and force a needless index
+// drop+recreate (a heavy lock + rebuild, plus a momentary uniqueness-guard gap for
+// a unique index).
 func normalizeSQLFragment(s string) string {
-	return strings.Join(strings.Fields(strings.ToLower(s)), " ")
+	return CanonicalizeSQLExpr(s)
 }
 
 func (idx *Index) Equals(other *Index) bool {
@@ -259,7 +263,7 @@ func GenerateMysqlIndexName(tableName string, schemaIndex *schemasv1alpha4.Mysql
 }
 
 func GeneratePostgresqlIndexName(tableName string, schemaIndex *schemasv1alpha4.PostgresqlTableIndex) string {
-	return fmt.Sprintf("idx_%s_%s", bareTableName(tableName), strings.Join(schemaIndex.Columns, "_"))
+	return capPostgresIdentifier(fmt.Sprintf("idx_%s_%s", bareTableName(tableName), strings.Join(schemaIndex.Columns, "_")))
 }
 
 func GenerateSqliteIndexName(tableName string, schemaIndex *schemasv1alpha4.SqliteTableIndex) string {

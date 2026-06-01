@@ -6,12 +6,14 @@ create table users (
   data jsonb
 );
 
--- Partial unique index. The predicate is written in PostgreSQL's canonical
--- form (matching pg_get_expr output) so the planner sees no change.
-create unique index idx_users_email_partial on users (email) where ((phone)::text <> ''::text);
+-- Partial unique index. The predicate is created in NATURAL form; PostgreSQL
+-- stores and renders it back canonically as "((phone)::text <> ''::text)". The
+-- natural-form spec must re-plan to no DDL (HIGH-2 proof).
+create unique index idx_users_email_partial on users (email) where phone <> '';
 
--- Functional / expression index, canonical form (matches pg_get_indexdef).
-create index idx_users_lower_email on users (lower((email)::text));
+-- Functional / expression index, also created in natural form (PostgreSQL stores
+-- it as "lower((email)::text)").
+create index idx_users_lower_email on users (lower(email));
 
 -- Index method hash (scalar column).
 create index idx_users_phone_hash on users using hash (phone);

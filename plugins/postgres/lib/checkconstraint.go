@@ -113,102 +113,11 @@ func checkExprEquivalent(a, b string) bool {
 
 // normalizeCheckExpr lowercases, removes ::type casts and all parentheses, and
 // collapses whitespace so two expressions that differ only by PostgreSQL's
-// canonicalization compare equal.
+// canonicalization compare equal. It delegates to the shared
+// types.CanonicalizeSQLExpr so the CHECK, index, and EXCLUDE expression-diff paths
+// use one canonicalization implementation and cannot drift.
 func normalizeCheckExpr(s string) string {
-	s = strings.ToLower(s)
-	s = stripTypeCasts(s)
-
-	var b strings.Builder
-	pendingSpace := false
-	for _, r := range s {
-		switch r {
-		case '(', ')':
-			// drop parens entirely
-			continue
-		case ' ', '\t', '\n', '\r':
-			pendingSpace = true
-			continue
-		default:
-			if pendingSpace && b.Len() > 0 {
-				b.WriteByte(' ')
-			}
-			pendingSpace = false
-			b.WriteRune(r)
-		}
-	}
-	return strings.TrimSpace(b.String())
-}
-
-// stripTypeCasts removes PostgreSQL "::type" cast suffixes, including ones with
-// a parenthesized length/modifier such as "::character varying" or
-// "::numeric(10,2)". It scans for "::" and drops the following type token (an
-// identifier run, optional whitespace-separated words like "character varying",
-// and an optional "( ... )" modifier).
-func stripTypeCasts(s string) string {
-	var b strings.Builder
-	i := 0
-	for i < len(s) {
-		if i+1 < len(s) && s[i] == ':' && s[i+1] == ':' {
-			i += 2
-			i = skipTypeToken(s, i)
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
-}
-
-// skipTypeToken advances past a type name beginning at index i: a run of
-// identifier characters, optionally followed by additional whitespace-separated
-// identifier words (e.g. "character varying", "double precision") and an
-// optional balanced "( ... )" modifier. It returns the index just past the type.
-func skipTypeToken(s string, i int) int {
-	consumeWord := func(j int) int {
-		for j < len(s) {
-			c := s[j]
-			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
-				j++
-				continue
-			}
-			break
-		}
-		return j
-	}
-
-	i = consumeWord(i)
-
-	// Allow multi-word types such as "character varying" / "double precision".
-	for {
-		j := i
-		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
-			j++
-		}
-		next := consumeWord(j)
-		if next == j {
-			break
-		}
-		i = next
-	}
-
-	// Optional "( ... )" length/precision modifier.
-	if i < len(s) && s[i] == '(' {
-		depth := 0
-		for i < len(s) {
-			if s[i] == '(' {
-				depth++
-			} else if s[i] == ')' {
-				depth--
-				if depth == 0 {
-					i++
-					break
-				}
-			}
-			i++
-		}
-	}
-
-	return i
+	return types.CanonicalizeSQLExpr(s)
 }
 
 // BuildCheckConstraintStatements computes the ADD/DROP statements that reconcile

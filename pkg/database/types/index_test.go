@@ -112,6 +112,15 @@ func Test_IndexEquals(t *testing.T) {
 			want: false,
 		},
 		{
+			// HIGH-2 regression: a partial-index predicate authored in NATURAL form
+			// must equal the CANONICAL text pg_get_expr renders back, or the index
+			// drops+recreates on every plan.
+			name: "natural where predicate equals canonical (pg_get_expr) form",
+			a:    &Index{Name: "i", Columns: []string{"a"}, Where: "phone <> ''"},
+			b:    &Index{Name: "i", Columns: []string{"a"}, Where: "((phone)::text <> ''::text)"},
+			want: true,
+		},
+		{
 			name: "empty where equals empty where",
 			a:    &Index{Name: "i", Columns: []string{"a"}},
 			b:    &Index{Name: "i", Columns: []string{"a"}, Where: ""},
@@ -152,6 +161,14 @@ func Test_IndexEquals(t *testing.T) {
 			a:    &Index{Name: "i", Expressions: []string{"lower(email)"}},
 			b:    &Index{Name: "i", Expressions: []string{"upper(email)"}},
 			want: false,
+		},
+		{
+			// HIGH-2 regression: a functional-index expression authored in NATURAL
+			// form must equal the CANONICAL text pg_get_indexdef renders back.
+			name: "natural expression equals canonical (pg_get_indexdef) form",
+			a:    &Index{Name: "i", Expressions: []string{"lower(email)"}},
+			b:    &Index{Name: "i", Expressions: []string{"lower((email)::text)"}},
+			want: true,
 		},
 		{
 			name: "one side has sorted columns, other plain columns: not equal",
