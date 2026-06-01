@@ -1,0 +1,25 @@
+database: schemahero
+name: measurements
+schema:
+  postgres:
+    primaryKey: [id]
+    columns:
+      - name: id
+        type: integer
+        constraints:
+          notNull: true
+      - name: temperature_celsius
+        type: integer
+        constraints:
+          notNull: true
+    # No explicit constraint name: SchemaHero derives one from the table + the
+    # (long) expression. The raw derived name
+    # "measurements_temperature_celsius_273_and_temperature_celsius_1000000_check"
+    # is 74 bytes, OVER PostgreSQL's 63-byte identifier limit. Before the HIGH-1
+    # fix the over-long name was emitted verbatim; PostgreSQL SILENTLY TRUNCATED it
+    # to 63 bytes on ADD, so the next reconcile looked up the FULL name, missed it,
+    # and emitted ADD-then-DROP -> re-apply fails 42710 -> the table's plan wedges.
+    # With the fix the name is capped to a stable <=63-byte form, so the second
+    # plan below is a true no-op.
+    checks:
+      - expression: temperature_celsius >= -273 and temperature_celsius <= 1000000

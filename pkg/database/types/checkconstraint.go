@@ -30,7 +30,7 @@ func GeneratePostgresqlCheckName(tableName string, c *schemasv1alpha4.Postgresql
 		return c.Name
 	}
 
-	return fmt.Sprintf("%s_%s_check", bareTableName(tableName), sanitizeIdentFragment(c.Expression))
+	return capPostgresIdentifier(fmt.Sprintf("%s_%s_check", bareTableName(tableName), sanitizeIdentFragment(c.Expression)))
 }
 
 // sanitizeIdentFragment turns an arbitrary expression into a safe identifier

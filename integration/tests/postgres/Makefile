@@ -32,6 +32,7 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
 	make -C exclusion-constraint-add run
 	make -C exclusion-constraint-drop run
 	make -C exclusion-constraint-idempotent run
@@ -76,6 +77,7 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
 	make -C exclusion-constraint-add run
 	make -C exclusion-constraint-drop run
 	make -C exclusion-constraint-idempotent run
@@ -120,6 +122,7 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
 	make -C exclusion-constraint-add run
 	make -C exclusion-constraint-drop run
 	make -C exclusion-constraint-idempotent run
@@ -164,6 +167,7 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
 	make -C exclusion-constraint-add run
 	make -C exclusion-constraint-drop run
 	make -C exclusion-constraint-idempotent run
@@ -208,6 +212,7 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
 	make -C exclusion-constraint-add run
 	make -C exclusion-constraint-drop run
 	make -C exclusion-constraint-idempotent run
