@@ -1,0 +1,14 @@
+database: schemahero
+name: users
+schema:
+  postgres:
+    primaryKey: [id]
+    columns:
+      - name: id
+        type: integer
+        constraints:
+          notNull: true
+      - name: age
+        type: integer
+        constraints:
+          notNull: true

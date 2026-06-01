@@ -251,6 +251,58 @@ func (p *PostgresConnection) ListTableForeignKeys(databaseName string, tableName
 	return foreignKeys, nil
 }
 
+// ListTableCheckConstraints returns the table-level CHECK constraints declared
+// on tableName. It introspects pg_constraint (contype='c') and renders each
+// predicate via pg_get_constraintdef; the returned Expression is the inner
+// boolean with the "CHECK (...)" wrapper stripped (see stripCheckWrapper).
+//
+// Modern PostgreSQL stores column NOT NULL in pg_attribute.attnotnull, NOT as a
+// contype='c' row, so this query does not surface NOT NULL constraints. The
+// integration suite exercises PG 14-18 to keep that guarantee honest.
+func (p *PostgresConnection) ListTableCheckConstraints(databaseName string, tableName string) ([]*types.CheckConstraint, error) {
+	schema := p.schema // Default to connection schema
+	actualTableName := tableName
+
+	if strings.Contains(tableName, ".") {
+		parts := strings.SplitN(tableName, ".", 2)
+		schema = parts[0]
+		actualTableName = parts[1]
+	}
+
+	query := `select
+	con.conname,
+	pg_get_constraintdef(con.oid, true) as condef
+from pg_constraint con
+	join pg_class cl on cl.oid = con.conrelid
+	join pg_namespace ns on ns.oid = cl.relnamespace
+where con.contype = 'c'
+	and con.conrelid <> 0
+	and cl.relname = $1
+	and ns.nspname = $2
+order by con.conname`
+
+	rows, err := p.conn.Query(context.Background(), query, actualTableName, schema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query check constraints")
+	}
+	defer rows.Close()
+
+	checkConstraints := make([]*types.CheckConstraint, 0)
+	for rows.Next() {
+		var conname, condef string
+		if err := rows.Scan(&conname, &condef); err != nil {
+			return nil, err
+		}
+
+		checkConstraints = append(checkConstraints, &types.CheckConstraint{
+			Name:       conname,
+			Expression: stripCheckWrapper(condef),
+		})
+	}
+
+	return checkConstraints, nil
+}
+
 func (p *PostgresConnection) GetTablePrimaryKey(tableName string) (*types.KeyConstraint, error) {
 	schema := p.schema // Default to connection schema
 	actualTableName := tableName

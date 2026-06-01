@@ -113,6 +113,13 @@ func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schema
 	}
 	statements = append(statements, foreignKeyStatements...)
 
+	// check constraint changes
+	checkConstraintStatements, err := BuildCheckConstraintStatements(p, tableName, postgresTableSchema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build check constraint statements")
+	}
+	statements = append(statements, checkConstraintStatements...)
+
 	// index changes
 	indexStatements, err := BuildIndexStatements(p, tableName, postgresTableSchema)
 	if err != nil {

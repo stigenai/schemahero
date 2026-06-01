@@ -136,6 +136,34 @@ spec:
                     type: object
                   cockroachdb:
                     properties:
+                      checks:
+                        description: |-
+                          Checks is the authoritative list of table-level CHECK constraints. A CHECK
+                          present on the table but absent from this list IS DROPPED on apply (the same
+                          authoritative behavior as foreignKeys and indexes).
+                        items:
+                          description: PostgresqlTableCheckConstraint is a table-level
+                            CHECK constraint.
+                          properties:
+                            expression:
+                              description: |-
+                                Expression is the raw boolean SQL placed inside CHECK ( ... ), e.g.
+                                "age >= 0" or "status in ('a','b')". It is emitted verbatim (it is already
+                                SQL, like an FK references clause) and is NOT quoted or escaped.
+                              type: string
+                            name:
+                              description: |-
+                                Name is the constraint name. Optional; if empty a deterministic name
+                                "<bareTable>_<sanitized-expr>_check" is generated. Setting Name explicitly
+                                is strongly recommended: expression-derived names are fragile (near-identical
+                                expressions can collide, and long expressions exceed PostgreSQL's 63-char
+                                identifier limit, silently truncating and breaking the diff).
+                              type: string
+                          required:
+                          - expression
+                          type: object
+                        maxItems: 100
+                        type: array
                       columns:
                         items:
                           properties:
@@ -475,6 +503,34 @@ spec:
                     type: object
                   postgres:
                     properties:
+                      checks:
+                        description: |-
+                          Checks is the authoritative list of table-level CHECK constraints. A CHECK
+                          present on the table but absent from this list IS DROPPED on apply (the same
+                          authoritative behavior as foreignKeys and indexes).
+                        items:
+                          description: PostgresqlTableCheckConstraint is a table-level
+                            CHECK constraint.
+                          properties:
+                            expression:
+                              description: |-
+                                Expression is the raw boolean SQL placed inside CHECK ( ... ), e.g.
+                                "age >= 0" or "status in ('a','b')". It is emitted verbatim (it is already
+                                SQL, like an FK references clause) and is NOT quoted or escaped.
+                              type: string
+                            name:
+                              description: |-
+                                Name is the constraint name. Optional; if empty a deterministic name
+                                "<bareTable>_<sanitized-expr>_check" is generated. Setting Name explicitly
+                                is strongly recommended: expression-derived names are fragile (near-identical
+                                expressions can collide, and long expressions exceed PostgreSQL's 63-char
+                                identifier limit, silently truncating and breaking the diff).
+                              type: string
+                          required:
+                          - expression
+                          type: object
+                        maxItems: 100
+                        type: array
                       columns:
                         items:
                           properties:

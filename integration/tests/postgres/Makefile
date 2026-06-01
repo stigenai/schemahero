@@ -25,6 +25,9 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
@@ -58,6 +61,9 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
@@ -91,6 +97,9 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
@@ -124,6 +133,9 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
@@ -157,6 +169,9 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run

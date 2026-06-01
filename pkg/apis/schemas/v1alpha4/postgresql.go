@@ -52,6 +52,20 @@ type PostgresqlTableForeignKey struct {
 	Name       string                              `json:"name,omitempty" yaml:"name,omitempty"`
 }
 
+// PostgresqlTableCheckConstraint is a table-level CHECK constraint.
+type PostgresqlTableCheckConstraint struct {
+	// Name is the constraint name. Optional; if empty a deterministic name
+	// "<bareTable>_<sanitized-expr>_check" is generated. Setting Name explicitly
+	// is strongly recommended: expression-derived names are fragile (near-identical
+	// expressions can collide, and long expressions exceed PostgreSQL's 63-char
+	// identifier limit, silently truncating and breaking the diff).
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	// Expression is the raw boolean SQL placed inside CHECK ( ... ), e.g.
+	// "age >= 0" or "status in ('a','b')". It is emitted verbatim (it is already
+	// SQL, like an FK references clause) and is NOT quoted or escaped.
+	Expression string `json:"expression" yaml:"expression"`
+}
+
 type PostgresqlTableIndex struct {
 	Columns  []string `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Name     string   `json:"name,omitempty" yaml:"name,omitempty"`
@@ -96,9 +110,14 @@ type PostgresqlTableSchema struct {
 	Schema      string                       `json:"schema,omitempty" yaml:"schema,omitempty"`
 	PrimaryKey  []string                     `json:"primaryKey,omitempty" yaml:"primaryKey,omitempty"`
 	ForeignKeys []*PostgresqlTableForeignKey `json:"foreignKeys,omitempty" yaml:"foreignKeys,omitempty"`
-	Indexes     []*PostgresqlTableIndex      `json:"indexes,omitempty" yaml:"indexes,omitempty"`
-	Columns     []*PostgresqlTableColumn     `json:"columns,omitempty" yaml:"columns,omitempty"`
-	IsDeleted   bool                         `json:"isDeleted,omitempty" yaml:"isDeleted,omitempty"`
+	// Checks is the authoritative list of table-level CHECK constraints. A CHECK
+	// present on the table but absent from this list IS DROPPED on apply (the same
+	// authoritative behavior as foreignKeys and indexes).
+	// +kubebuilder:validation:MaxItems=100
+	Checks    []*PostgresqlTableCheckConstraint `json:"checks,omitempty" yaml:"checks,omitempty"`
+	Indexes   []*PostgresqlTableIndex           `json:"indexes,omitempty" yaml:"indexes,omitempty"`
+	Columns   []*PostgresqlTableColumn          `json:"columns,omitempty" yaml:"columns,omitempty"`
+	IsDeleted bool                              `json:"isDeleted,omitempty" yaml:"isDeleted,omitempty"`
 	// Deprecated: this field should be avoided and one should use Triggers without json prefix instead
 	// +kubebuilder:validation:MaxItems=100
 	JSONTriggers []*PostgresqlTableTrigger `json:"json:triggers,omitempty" yaml:"json:triggers,omitempty"`
