@@ -127,6 +127,14 @@ func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schema
 	}
 	statements = append(statements, indexStatements...)
 
+	// exclusion constraint changes (emitted after indexes: an EXCLUDE depends on
+	// the table's columns existing and behaves like the other index-backed objects)
+	exclusionConstraintStatements, err := BuildExclusionConstraintStatements(p, tableName, postgresTableSchema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build exclusion constraint statements")
+	}
+	statements = append(statements, exclusionConstraintStatements...)
+
 	statements = append(statements, seedDataStatements...)
 
 	return statements, nil

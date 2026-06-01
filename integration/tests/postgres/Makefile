@@ -28,6 +28,9 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
@@ -64,6 +67,9 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
@@ -100,6 +106,9 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
@@ -136,6 +145,9 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
@@ -172,6 +184,9 @@ build-postgres-plugin:
 	make -C check-constraint-add run
 	make -C check-constraint-drop run
 	make -C check-constraint-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run

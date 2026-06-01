@@ -1,0 +1,14 @@
+database: schemahero
+name: reservations
+schema:
+  postgres:
+    primaryKey: [id]
+    columns:
+      - name: id
+        type: integer
+        constraints:
+          notNull: true
+      - name: during
+        type: daterange
+        constraints:
+          notNull: true

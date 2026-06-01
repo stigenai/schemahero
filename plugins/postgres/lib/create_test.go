@@ -200,6 +200,36 @@ func Test_CreateTableStatement(t *testing.T) {
 				`create table "app"."events" ("priority" integer, constraint "events_priority_0_check" check (priority > 0))`,
 			},
 		},
+		{
+			name: "with exclusion constraint emits inline clause",
+			tableSchema: &schemasv1alpha4.PostgresqlTableSchema{
+				PrimaryKey: []string{
+					"id",
+				},
+				Columns: []*schemasv1alpha4.PostgresqlTableColumn{
+					{
+						Name: "id",
+						Type: "integer",
+					},
+					{
+						Name: "during",
+						Type: "daterange",
+					},
+				},
+				ExclusionConstraints: []*schemasv1alpha4.PostgresqlTableExclusionConstraint{
+					{
+						Name: "reservations_during_excl",
+						Items: []*schemasv1alpha4.PostgresqlTableExclusionConstraintItem{
+							{Column: "during", Operator: "&&"},
+						},
+					},
+				},
+			},
+			tableName: "reservations",
+			expectedStatements: []string{
+				`create table "reservations" ("id" integer, "during" daterange, primary key ("id"), constraint "reservations_during_excl" exclude using "gist" ("during" with &&))`,
+			},
+		},
 	}
 
 	for _, test := range tests {

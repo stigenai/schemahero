@@ -116,7 +116,13 @@ func (p *PostgresConnection) ListTableIndexes(databaseName string, tableName str
 	join pg_class as i on i.oid = idx.indexrelid
 	join pg_am as am on i.relam = am.oid
 	where idx.indrelid = $1::regclass
-	and idx.indisprimary = false`
+	and idx.indisprimary = false
+	-- Exclude the backing index of an EXCLUDE constraint: it is owned by the
+	-- constraint (dropped via DROP CONSTRAINT, which cascades it). If it leaked
+	-- into the index diff, the existing-index sweep would emit "drop index <name>"
+	-- which PostgreSQL rejects ("cannot drop index ... because constraint ...
+	-- requires it"). indisexclusion is true exactly for such indexes (PG 9.1+).
+	and idx.indisexclusion = false`
 	rows, err := p.conn.Query(context.Background(), query, qualifiedTableName)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to query indexes")
@@ -301,6 +307,55 @@ order by con.conname`
 	}
 
 	return checkConstraints, nil
+}
+
+// ListTableExclusionConstraints returns the table-level EXCLUDE constraints
+// declared on tableName. It introspects pg_constraint (contype='x') and parses
+// the canonical pg_get_constraintdef rendering (the most robust source of truth
+// for the access method, ordered element/operator pairs, and partial predicate).
+// The constraint's backing index is deliberately NOT returned by ListTableIndexes
+// (filtered via indisexclusion=false) so the index diff never tries to DROP INDEX
+// it; an EXCLUDE is dropped via DROP CONSTRAINT, which cascades the index.
+func (p *PostgresConnection) ListTableExclusionConstraints(databaseName string, tableName string) ([]*types.ExclusionConstraint, error) {
+	schema := p.schema // Default to connection schema
+	actualTableName := tableName
+
+	if strings.Contains(tableName, ".") {
+		parts := strings.SplitN(tableName, ".", 2)
+		schema = parts[0]
+		actualTableName = parts[1]
+	}
+
+	query := `select
+	con.conname,
+	pg_get_constraintdef(con.oid, true) as condef
+from pg_constraint con
+	join pg_class cl on cl.oid = con.conrelid
+	join pg_namespace ns on ns.oid = cl.relnamespace
+where con.contype = 'x'
+	and cl.relname = $1
+	and ns.nspname = $2
+order by con.conname`
+
+	rows, err := p.conn.Query(context.Background(), query, actualTableName, schema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query exclusion constraints")
+	}
+	defer rows.Close()
+
+	exclusionConstraints := make([]*types.ExclusionConstraint, 0)
+	for rows.Next() {
+		var conname, condef string
+		if err := rows.Scan(&conname, &condef); err != nil {
+			return nil, err
+		}
+
+		parsed := parseExclusionConstraintDef(condef)
+		parsed.Name = conname
+		exclusionConstraints = append(exclusionConstraints, &parsed)
+	}
+
+	return exclusionConstraints, nil
 }
 
 func (p *PostgresConnection) GetTablePrimaryKey(tableName string) (*types.KeyConstraint, error) {

@@ -1,0 +1,27 @@
+database: schemahero
+name: reservations
+schema:
+  postgres:
+    primaryKey: [id]
+    columns:
+      - name: id
+        type: integer
+        constraints:
+          notNull: true
+      - name: room_id
+        type: integer
+        constraints:
+          notNull: true
+      - name: during
+        type: daterange
+        constraints:
+          notNull: true
+    exclusionConstraints:
+      - name: reservations_room_during_excl
+        using: gist
+        items:
+          - column: room_id
+            operator: "="
+          - column: during
+            operator: "&&"
+        where: room_id is not null

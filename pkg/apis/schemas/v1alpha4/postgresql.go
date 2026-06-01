@@ -66,6 +66,48 @@ type PostgresqlTableCheckConstraint struct {
 	Expression string `json:"expression" yaml:"expression"`
 }
 
+// PostgresqlTableExclusionConstraintItem is one "element WITH operator" pair of an
+// EXCLUDE constraint, e.g. {Column: "room_id", Operator: "="} or
+// {Expression: "tstzrange(starts_at, ends_at)", Operator: "&&"}. Exactly one of
+// Column or Expression must be set.
+// +kubebuilder:validation:ExactlyOneOf=column;expression
+type PostgresqlTableExclusionConstraintItem struct {
+	// Column is a plain column reference. It is identifier-quoted on emit.
+	Column string `json:"column,omitempty" yaml:"column,omitempty"`
+	// Expression is a raw SQL element expression, e.g. "tstzrange(starts_at, ends_at)".
+	// It is emitted verbatim inside parentheses (never identifier-quoted).
+	Expression string `json:"expression,omitempty" yaml:"expression,omitempty"`
+	// Operator is the PostgreSQL operator token used to compare this element across
+	// rows, e.g. "=", "&&", "<@". It is emitted raw (it is an operator, not an identifier).
+	Operator string `json:"operator" yaml:"operator"`
+}
+
+// PostgresqlTableExclusionConstraint is a table-level EXCLUDE constraint, e.g.
+// EXCLUDE USING gist (room_id WITH =, during WITH &&) WHERE (room_id IS NOT NULL).
+//
+// An EXCLUDE present on the table but absent from PostgresqlTableSchema.ExclusionConstraints
+// IS DROPPED on apply (the same authoritative behavior as foreignKeys, checks, and
+// indexes). EXCLUDE constraints with scalar equality operators under the default gist
+// access method require the btree_gist extension; SchemaHero does NOT install it.
+type PostgresqlTableExclusionConstraint struct {
+	// Name is the constraint name. Optional; if empty a deterministic name
+	// "<bareTable>_<element>_excl" is generated. Setting Name explicitly is
+	// strongly recommended (generated names can collide or exceed the 63-char limit).
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	// Using is the index access method backing the constraint; defaults to gist.
+	Using string `json:"using,omitempty" yaml:"using,omitempty"`
+	// Items is the ordered list of "element WITH operator" pairs. Order is
+	// significant and is compared order-sensitively by the diff.
+	Items []*PostgresqlTableExclusionConstraintItem `json:"items" yaml:"items"`
+	// Where is a partial-constraint predicate (raw SQL, without the WHERE keyword),
+	// e.g. "room_id IS NOT NULL". Emitted verbatim.
+	Where string `json:"where,omitempty" yaml:"where,omitempty"`
+	// With holds index storage parameters, e.g. {fillfactor: "70"}. These are
+	// emitted on CREATE but NOT compared by the diff (introspection cannot cheaply
+	// recover them), matching how the FK/index diffs compare structurally.
+	With map[string]string `json:"with,omitempty" yaml:"with,omitempty"`
+}
+
 type PostgresqlTableIndex struct {
 	Columns  []string `json:"columns,omitempty" yaml:"columns,omitempty"`
 	Name     string   `json:"name,omitempty" yaml:"name,omitempty"`
@@ -114,10 +156,16 @@ type PostgresqlTableSchema struct {
 	// present on the table but absent from this list IS DROPPED on apply (the same
 	// authoritative behavior as foreignKeys and indexes).
 	// +kubebuilder:validation:MaxItems=100
-	Checks    []*PostgresqlTableCheckConstraint `json:"checks,omitempty" yaml:"checks,omitempty"`
-	Indexes   []*PostgresqlTableIndex           `json:"indexes,omitempty" yaml:"indexes,omitempty"`
-	Columns   []*PostgresqlTableColumn          `json:"columns,omitempty" yaml:"columns,omitempty"`
-	IsDeleted bool                              `json:"isDeleted,omitempty" yaml:"isDeleted,omitempty"`
+	Checks  []*PostgresqlTableCheckConstraint `json:"checks,omitempty" yaml:"checks,omitempty"`
+	Indexes []*PostgresqlTableIndex           `json:"indexes,omitempty" yaml:"indexes,omitempty"`
+	// ExclusionConstraints is the authoritative list of table-level EXCLUDE
+	// constraints. An EXCLUDE present on the table but absent from this list IS
+	// DROPPED on apply (the same authoritative behavior as foreignKeys, checks,
+	// and indexes).
+	// +kubebuilder:validation:MaxItems=100
+	ExclusionConstraints []*PostgresqlTableExclusionConstraint `json:"exclusionConstraints,omitempty" yaml:"exclusionConstraints,omitempty"`
+	Columns              []*PostgresqlTableColumn              `json:"columns,omitempty" yaml:"columns,omitempty"`
+	IsDeleted            bool                                  `json:"isDeleted,omitempty" yaml:"isDeleted,omitempty"`
 	// Deprecated: this field should be avoided and one should use Triggers without json prefix instead
 	// +kubebuilder:validation:MaxItems=100
 	JSONTriggers []*PostgresqlTableTrigger `json:"json:triggers,omitempty" yaml:"json:triggers,omitempty"`

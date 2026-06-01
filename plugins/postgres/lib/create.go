@@ -124,6 +124,10 @@ func CreateTableStatements(tableName string, tableSchema *schemasv1alpha4.Postgr
 		columns = append(columns, checkConstraintClause(tableName, check))
 	}
 
+	for _, exclusionConstraint := range tableSchema.ExclusionConstraints {
+		columns = append(columns, exclusionConstraintClause(tableName, exclusionConstraint))
+	}
+
 	qualifiedTableName := tableName
 	if tableSchema.Schema != "" && tableSchema.Schema != "public" {
 		qualifiedTableName = fmt.Sprintf("%s.%s", tableSchema.Schema, tableName)
