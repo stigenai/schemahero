@@ -153,6 +153,30 @@ func CreateTableStatements(tableName string, tableSchema *schemasv1alpha4.Postgr
 
 		queries = append(queries, statement)
 	}
+
+	// Row-level security on a brand-new table: emit the ENABLE/FORCE toggles and
+	// CREATE POLICY statements. There is nothing pre-existing to drop, so no guard
+	// or diff is needed; reuse the same statement builders as the alter path so the
+	// rendering (and thus idempotency on a subsequent re-plan) is identical.
+	//
+	// Only emit a toggle for the "on" direction: a fresh table defaults to RLS
+	// disabled / not forced, so emitting "disable"/"noforce" would be a redundant
+	// no-op and would also churn a later re-plan (the alter path omits no-op
+	// toggles). Defaults (PERMISSIVE, command ALL, PUBLIC roles) are likewise
+	// omitted by CreatePolicyStatement.
+	if tableSchema.RowLevelSecurity != nil {
+		rls := tableSchema.RowLevelSecurity
+		if strings.EqualFold(strings.TrimSpace(rls.Enable), "enable") {
+			queries = append(queries, enableRowLevelSecurityStatement(qualifiedTableName, true))
+		}
+		if strings.EqualFold(strings.TrimSpace(rls.Force), "force") {
+			queries = append(queries, forceRowLevelSecurityStatement(qualifiedTableName, true))
+		}
+		for _, policy := range tableSchema.Policies {
+			queries = append(queries, CreatePolicyStatement(qualifiedTableName, policy))
+		}
+	}
+
 	return queries, nil
 }
 

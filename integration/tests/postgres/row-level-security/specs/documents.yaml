@@ -1,0 +1,28 @@
+database: schemahero
+name: documents
+schema:
+  postgres:
+    primaryKey: [id]
+    columns:
+      - name: id
+        type: integer
+        constraints:
+          notNull: true
+      - name: tenant_id
+        type: integer
+        constraints:
+          notNull: true
+      - name: body
+        type: text
+    rowLevelSecurity:
+      enable: enable
+      force: force
+    policies:
+      - name: tenant_isolation
+        command: ALL
+        using: "tenant_id = current_setting('app.tenant_id')::integer"
+        withCheck: "tenant_id = current_setting('app.tenant_id')::integer"
+      - name: tenant_read
+        command: SELECT
+        roles: [app_user]
+        using: "tenant_id = current_setting('app.tenant_id')::integer"

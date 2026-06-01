@@ -55,6 +55,8 @@ func RegisterSchemaTypes() {
 	gob.Register(&schemasv1alpha4.PostgresqlTableForeignKey{})
 	gob.Register(&schemasv1alpha4.PostgresqlTableIndex{})
 	gob.Register(&schemasv1alpha4.PostgresqlTableTrigger{})
+	gob.Register(&schemasv1alpha4.PostgresqlTableRowLevelSecurity{})
+	gob.Register(&schemasv1alpha4.PostgresqlTablePolicy{})
 
 	// Register MySQL nested types
 	gob.Register(&schemasv1alpha4.MysqlTableColumn{})

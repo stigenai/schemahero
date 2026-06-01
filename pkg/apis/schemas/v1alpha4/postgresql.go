@@ -148,6 +148,66 @@ type PostgresqlTableColumn struct {
 	Default     *string                           `json:"default,omitempty" yaml:"default,omitempty"`
 }
 
+// PostgresqlTableRowLevelSecurity toggles table-level row-level security via
+// ALTER TABLE ... ENABLE/DISABLE ROW LEVEL SECURITY and ... [NO] FORCE ROW
+// LEVEL SECURITY. Presence of this object (even empty) is the opt-in signal that
+// the table's POLICIES are managed by SchemaHero: when it is nil, neither the
+// RLS toggles NOR the policies are touched, so an existing RLS-enabled table is
+// never accidentally wiped by a spec that simply omits these fields.
+//
+// Enable and Force are STRING enums (not *bool) on purpose: the plugin runs in a
+// separate process and the schema crosses a gob RPC boundary, where a *bool that
+// points to false decodes back as nil (the gob zero-value-pointer behavior — the
+// same reason a column's notNull:false is indistinguishable from unset across the
+// boundary). A string round-trips reliably, so the three states ("" / enable /
+// disable) survive intact. The empty-string default leaves the flag UNMANAGED,
+// which is the safe default for a security feature: an empty rowLevelSecurity{}
+// never silently DISABLEs RLS — it only opts policies into management.
+type PostgresqlTableRowLevelSecurity struct {
+	// Enable controls ALTER TABLE ... ENABLE/DISABLE ROW LEVEL SECURITY.
+	// "" (default) = leave the current setting unmanaged (emit no toggle);
+	// "enable" = ENABLE; "disable" = DISABLE.
+	//+kubebuilder:validation:Enum=enable;disable
+	Enable string `json:"enable,omitempty" yaml:"enable,omitempty"`
+	// Force controls ALTER TABLE ... [NO] FORCE ROW LEVEL SECURITY (whether RLS
+	// also applies to the table owner). "" (default) = leave unmanaged;
+	// "force" = FORCE; "noforce" = NO FORCE.
+	//+kubebuilder:validation:Enum=force;noforce
+	Force string `json:"force,omitempty" yaml:"force,omitempty"`
+}
+
+// PostgresqlTablePolicy is a single CREATE POLICY definition. PostgreSQL has no
+// ALTER POLICY that can change a policy's command/permissive/roles and no
+// CREATE POLICY ... IF NOT EXISTS, so a policy whose structural attributes
+// change is dropped (DROP POLICY IF EXISTS) and recreated by the diff.
+type PostgresqlTablePolicy struct {
+	// Name is the policy name (unique per table). Required: an unnamed policy
+	// cannot be introspected, matched, or dropped by the diff.
+	Name string `json:"name" yaml:"name"`
+	// Command restricts the policy to a statement class. ALL is the PostgreSQL
+	// default and is emitted by omitting "FOR <cmd>" to keep re-plans idempotent.
+	//+kubebuilder:validation:Enum=ALL;SELECT;INSERT;UPDATE;DELETE
+	//+kubebuilder:default:=ALL
+	Command string `json:"command,omitempty" yaml:"command,omitempty"`
+	// Permissive selects PERMISSIVE (OR-combined, the default) or RESTRICTIVE
+	// (AND-combined) policy semantics. PERMISSIVE is emitted by omitting "AS
+	// RESTRICTIVE" to match the catalog default and keep re-plans idempotent.
+	//+kubebuilder:validation:Enum=PERMISSIVE;RESTRICTIVE
+	//+kubebuilder:default:=PERMISSIVE
+	Permissive string `json:"permissive,omitempty" yaml:"permissive,omitempty"`
+	// Roles are the database roles the policy applies TO. Empty => PUBLIC (the
+	// "TO" clause is omitted), which matches how pg_policy stores a PUBLIC policy.
+	Roles []string `json:"roles,omitempty" yaml:"roles,omitempty"`
+	// Using is the raw boolean SQL for the USING (row visibility) clause, e.g.
+	// "tenant_id = current_setting('app.tenant_id')::uuid". It is emitted verbatim
+	// inside parentheses (it is already SQL, like a CHECK expression) and is NEVER
+	// quoted or escaped.
+	Using *string `json:"using,omitempty" yaml:"using,omitempty"`
+	// WithCheck is the raw boolean SQL for the WITH CHECK (write validation)
+	// clause. Emitted verbatim inside parentheses, never quoted or escaped.
+	WithCheck *string `json:"withCheck,omitempty" yaml:"withCheck,omitempty"`
+}
+
 type PostgresqlTableSchema struct {
 	Schema      string                       `json:"schema,omitempty" yaml:"schema,omitempty"`
 	PrimaryKey  []string                     `json:"primaryKey,omitempty" yaml:"primaryKey,omitempty"`
@@ -171,6 +231,16 @@ type PostgresqlTableSchema struct {
 	JSONTriggers []*PostgresqlTableTrigger `json:"json:triggers,omitempty" yaml:"json:triggers,omitempty"`
 	// +kubebuilder:validation:MaxItems=100
 	Triggers []*PostgresqlTableTrigger `json:"triggers,omitempty" yaml:"triggers,omitempty"`
+	// RowLevelSecurity opts the table into SchemaHero-managed row-level security.
+	// When set (even empty), the ENABLE/FORCE toggles are reconciled AND Policies
+	// becomes authoritative (a policy on the table but absent from Policies is
+	// DROPPED). When nil, neither RLS toggles nor policies are touched — so an
+	// existing RLS table is never silently wiped by a spec that omits these fields.
+	RowLevelSecurity *PostgresqlTableRowLevelSecurity `json:"rowLevelSecurity,omitempty" yaml:"rowLevelSecurity,omitempty"`
+	// Policies is the authoritative list of row-level security policies. It is
+	// reconciled ONLY when RowLevelSecurity is non-nil (see above).
+	// +kubebuilder:validation:MaxItems=100
+	Policies []*PostgresqlTablePolicy `json:"policies,omitempty" yaml:"policies,omitempty"`
 }
 
 type PostgresqlFunctionSchema struct {

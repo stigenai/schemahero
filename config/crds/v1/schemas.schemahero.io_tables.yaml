@@ -419,10 +419,99 @@ spec:
                               == 1'
                         maxItems: 100
                         type: array
+                      policies:
+                        description: |-
+                          Policies is the authoritative list of row-level security policies. It is
+                          reconciled ONLY when RowLevelSecurity is non-nil (see above).
+                        items:
+                          description: |-
+                            PostgresqlTablePolicy is a single CREATE POLICY definition. PostgreSQL has no
+                            ALTER POLICY that can change a policy's command/permissive/roles and no
+                            CREATE POLICY ... IF NOT EXISTS, so a policy whose structural attributes
+                            change is dropped (DROP POLICY IF EXISTS) and recreated by the diff.
+                          properties:
+                            command:
+                              default: ALL
+                              description: |-
+                                Command restricts the policy to a statement class. ALL is the PostgreSQL
+                                default and is emitted by omitting "FOR <cmd>" to keep re-plans idempotent.
+                              enum:
+                              - ALL
+                              - SELECT
+                              - INSERT
+                              - UPDATE
+                              - DELETE
+                              type: string
+                            name:
+                              description: |-
+                                Name is the policy name (unique per table). Required: an unnamed policy
+                                cannot be introspected, matched, or dropped by the diff.
+                              type: string
+                            permissive:
+                              default: PERMISSIVE
+                              description: |-
+                                Permissive selects PERMISSIVE (OR-combined, the default) or RESTRICTIVE
+                                (AND-combined) policy semantics. PERMISSIVE is emitted by omitting "AS
+                                RESTRICTIVE" to match the catalog default and keep re-plans idempotent.
+                              enum:
+                              - PERMISSIVE
+                              - RESTRICTIVE
+                              type: string
+                            roles:
+                              description: |-
+                                Roles are the database roles the policy applies TO. Empty => PUBLIC (the
+                                "TO" clause is omitted), which matches how pg_policy stores a PUBLIC policy.
+                              items:
+                                type: string
+                              type: array
+                            using:
+                              description: |-
+                                Using is the raw boolean SQL for the USING (row visibility) clause, e.g.
+                                "tenant_id = current_setting('app.tenant_id')::uuid". It is emitted verbatim
+                                inside parentheses (it is already SQL, like a CHECK expression) and is NEVER
+                                quoted or escaped.
+                              type: string
+                            withCheck:
+                              description: |-
+                                WithCheck is the raw boolean SQL for the WITH CHECK (write validation)
+                                clause. Emitted verbatim inside parentheses, never quoted or escaped.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        maxItems: 100
+                        type: array
                       primaryKey:
                         items:
                           type: string
                         type: array
+                      rowLevelSecurity:
+                        description: |-
+                          RowLevelSecurity opts the table into SchemaHero-managed row-level security.
+                          When set (even empty), the ENABLE/FORCE toggles are reconciled AND Policies
+                          becomes authoritative (a policy on the table but absent from Policies is
+                          DROPPED). When nil, neither RLS toggles nor policies are touched — so an
+                          existing RLS table is never silently wiped by a spec that omits these fields.
+                        properties:
+                          enable:
+                            description: |-
+                              Enable controls ALTER TABLE ... ENABLE/DISABLE ROW LEVEL SECURITY.
+                              "" (default) = leave the current setting unmanaged (emit no toggle);
+                              "enable" = ENABLE; "disable" = DISABLE.
+                            enum:
+                            - enable
+                            - disable
+                            type: string
+                          force:
+                            description: |-
+                              Force controls ALTER TABLE ... [NO] FORCE ROW LEVEL SECURITY (whether RLS
+                              also applies to the table owner). "" (default) = leave unmanaged;
+                              "force" = FORCE; "noforce" = NO FORCE.
+                            enum:
+                            - force
+                            - noforce
+                            type: string
+                        type: object
                       schema:
                         type: string
                       triggers:
@@ -864,10 +953,99 @@ spec:
                               == 1'
                         maxItems: 100
                         type: array
+                      policies:
+                        description: |-
+                          Policies is the authoritative list of row-level security policies. It is
+                          reconciled ONLY when RowLevelSecurity is non-nil (see above).
+                        items:
+                          description: |-
+                            PostgresqlTablePolicy is a single CREATE POLICY definition. PostgreSQL has no
+                            ALTER POLICY that can change a policy's command/permissive/roles and no
+                            CREATE POLICY ... IF NOT EXISTS, so a policy whose structural attributes
+                            change is dropped (DROP POLICY IF EXISTS) and recreated by the diff.
+                          properties:
+                            command:
+                              default: ALL
+                              description: |-
+                                Command restricts the policy to a statement class. ALL is the PostgreSQL
+                                default and is emitted by omitting "FOR <cmd>" to keep re-plans idempotent.
+                              enum:
+                              - ALL
+                              - SELECT
+                              - INSERT
+                              - UPDATE
+                              - DELETE
+                              type: string
+                            name:
+                              description: |-
+                                Name is the policy name (unique per table). Required: an unnamed policy
+                                cannot be introspected, matched, or dropped by the diff.
+                              type: string
+                            permissive:
+                              default: PERMISSIVE
+                              description: |-
+                                Permissive selects PERMISSIVE (OR-combined, the default) or RESTRICTIVE
+                                (AND-combined) policy semantics. PERMISSIVE is emitted by omitting "AS
+                                RESTRICTIVE" to match the catalog default and keep re-plans idempotent.
+                              enum:
+                              - PERMISSIVE
+                              - RESTRICTIVE
+                              type: string
+                            roles:
+                              description: |-
+                                Roles are the database roles the policy applies TO. Empty => PUBLIC (the
+                                "TO" clause is omitted), which matches how pg_policy stores a PUBLIC policy.
+                              items:
+                                type: string
+                              type: array
+                            using:
+                              description: |-
+                                Using is the raw boolean SQL for the USING (row visibility) clause, e.g.
+                                "tenant_id = current_setting('app.tenant_id')::uuid". It is emitted verbatim
+                                inside parentheses (it is already SQL, like a CHECK expression) and is NEVER
+                                quoted or escaped.
+                              type: string
+                            withCheck:
+                              description: |-
+                                WithCheck is the raw boolean SQL for the WITH CHECK (write validation)
+                                clause. Emitted verbatim inside parentheses, never quoted or escaped.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        maxItems: 100
+                        type: array
                       primaryKey:
                         items:
                           type: string
                         type: array
+                      rowLevelSecurity:
+                        description: |-
+                          RowLevelSecurity opts the table into SchemaHero-managed row-level security.
+                          When set (even empty), the ENABLE/FORCE toggles are reconciled AND Policies
+                          becomes authoritative (a policy on the table but absent from Policies is
+                          DROPPED). When nil, neither RLS toggles nor policies are touched — so an
+                          existing RLS table is never silently wiped by a spec that omits these fields.
+                        properties:
+                          enable:
+                            description: |-
+                              Enable controls ALTER TABLE ... ENABLE/DISABLE ROW LEVEL SECURITY.
+                              "" (default) = leave the current setting unmanaged (emit no toggle);
+                              "enable" = ENABLE; "disable" = DISABLE.
+                            enum:
+                            - enable
+                            - disable
+                            type: string
+                          force:
+                            description: |-
+                              Force controls ALTER TABLE ... [NO] FORCE ROW LEVEL SECURITY (whether RLS
+                              also applies to the table owner). "" (default) = leave unmanaged;
+                              "force" = FORCE; "noforce" = NO FORCE.
+                            enum:
+                            - force
+                            - noforce
+                            type: string
+                        type: object
                       schema:
                         type: string
                       triggers:

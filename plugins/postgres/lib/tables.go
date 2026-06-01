@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v4"
 	"github.com/pkg/errors"
 	"github.com/schemahero/schemahero/pkg/database/types"
 )
@@ -531,4 +532,122 @@ func (p *PostgresConnection) GetTableSchema(tableName string) ([]*types.Column, 
 	}
 
 	return columns, nil
+}
+
+// GetTableRowSecurity returns the table's row-level security flags from
+// pg_class (relrowsecurity = ENABLE state, relforcerowsecurity = FORCE state).
+// Both are non-null bool columns. The schema is resolved the same way as the
+// other introspectors: from a "schema." prefix on tableName, else the
+// connection's default schema.
+//
+// If the table is not found (e.g. it does not exist yet), it returns the zero
+// RowLevelSecurity{} (both false) and no error — the caller (CheckIfTableExists)
+// already gates on existence, so this is only reached for an existing table.
+func (p *PostgresConnection) GetTableRowSecurity(tableName string) (*types.RowLevelSecurity, error) {
+	schema := p.schema // Default to connection schema
+	actualTableName := tableName
+
+	if strings.Contains(tableName, ".") {
+		parts := strings.SplitN(tableName, ".", 2)
+		schema = parts[0]
+		actualTableName = parts[1]
+	}
+
+	query := `select c.relrowsecurity, c.relforcerowsecurity
+from pg_class c
+	join pg_namespace n on n.oid = c.relnamespace
+where c.relname = $1
+	and n.nspname = $2`
+
+	row := p.conn.QueryRow(context.Background(), query, actualTableName, schema)
+
+	var enabled, forced bool
+	if err := row.Scan(&enabled, &forced); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &types.RowLevelSecurity{}, nil
+		}
+		return nil, errors.Wrap(err, "failed to scan row level security flags")
+	}
+
+	return &types.RowLevelSecurity{Enabled: enabled, Forced: forced}, nil
+}
+
+// ListTablePolicies returns the row-level security policies on tableName from
+// pg_policy. polcmd is a single char ('*' ALL, 'r' SELECT, 'a' INSERT, 'w'
+// UPDATE, 'd' DELETE) and is mapped to a Command string. polpermissive is true
+// for PERMISSIVE. The USING / WITH CHECK expressions are rendered canonically by
+// pg_get_expr (NULL when absent). The applied-to roles are resolved from the
+// polroles oid[] to role names; the pseudo-role PUBLIC (OID 0) has no pg_authid
+// row, so the array subselect drops it and COALESCE maps "no rows" -> ['public']
+// — matching how the desired-side converter normalizes empty roles.
+func (p *PostgresConnection) ListTablePolicies(tableName string) ([]*types.Policy, error) {
+	schema := p.schema // Default to connection schema
+	actualTableName := tableName
+
+	if strings.Contains(tableName, ".") {
+		parts := strings.SplitN(tableName, ".", 2)
+		schema = parts[0]
+		actualTableName = parts[1]
+	}
+
+	query := `select
+	pol.polname,
+	pol.polcmd,
+	pol.polpermissive,
+	pg_get_expr(pol.polqual, pol.polrelid) as using_expr,
+	pg_get_expr(pol.polwithcheck, pol.polrelid) as with_check_expr,
+	coalesce(
+		(select array_agg(a.rolname::text order by a.rolname)
+		 from pg_authid a
+		 where a.oid = any(pol.polroles)),
+		array['public']::text[]
+	) as roles
+from pg_policy pol
+	join pg_class c on c.oid = pol.polrelid
+	join pg_namespace n on n.oid = c.relnamespace
+where c.relname = $1
+	and n.nspname = $2
+order by pol.polname`
+
+	rows, err := p.conn.Query(context.Background(), query, actualTableName, schema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query policies")
+	}
+	defer rows.Close()
+
+	policies := make([]*types.Policy, 0)
+	for rows.Next() {
+		var name string
+		// pg_policy.polcmd is the internal "char" type (a single byte), which pgx
+		// surfaces as int32 (e.g. 42 for '*'), NOT a Go string. Scan it as a rune
+		// and convert before mapping to a Command.
+		var polcmd int32
+		var permissive bool
+		var usingExpr, withCheckExpr sql.NullString
+		var roles []string
+
+		if err := rows.Scan(&name, &polcmd, &permissive, &usingExpr, &withCheckExpr, &roles); err != nil {
+			return nil, err
+		}
+
+		policy := types.Policy{
+			Name:       name,
+			Command:    types.PolicyCommandFromCatalogChar(string(rune(polcmd))),
+			Permissive: permissive,
+			Roles:      roles,
+		}
+
+		if usingExpr.Valid {
+			value := usingExpr.String
+			policy.Using = &value
+		}
+		if withCheckExpr.Valid {
+			value := withCheckExpr.String
+			policy.WithCheck = &value
+		}
+
+		policies = append(policies, &policy)
+	}
+
+	return policies, nil
 }

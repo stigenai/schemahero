@@ -167,7 +167,161 @@ func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schema
 	}
 	statements = append(statements, triggerStatements...)
 
+	// row-level security: ENABLE/FORCE toggles + policy create/drop/recreate.
+	// Emitted after columns (a policy expression can reference a column) and gated
+	// on the table opting into RLS management (RowLevelSecurity != nil). NOT
+	// emitted for a brand-new table — CreateTableStatements already does that.
+	rlsStatements, err := BuildRowLevelSecurityStatements(p, tableName, postgresTableSchema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build row level security statements")
+	}
+	statements = append(statements, rlsStatements...)
+
 	statements = append(statements, seedDataStatements...)
+
+	return statements, nil
+}
+
+// BuildRowLevelSecurityStatements diffs the row-level security configuration in
+// postgresTableSchema against the (already-existing) table and returns the
+// migration statements. It is two independent concerns emitted in order:
+//
+//	A) ENABLE/FORCE toggles (idempotent, never destructive).
+//	B) Policies — a two-pass guarded create/drop/recreate mirroring
+//	   BuildForeignKeyStatements / BuildTriggerStatements.
+//
+// DESTRUCTIVE-SAFETY BOUNDARY: the entire function is gated on
+// postgresTableSchema.RowLevelSecurity != nil. A table that does NOT opt into
+// RLS management (the field is nil) has neither its RLS flags toggled NOR its
+// policies touched. This is critical: without the gate, adopting an existing
+// RLS-enabled table with a spec that simply omits `policies` would make the
+// pass-2 sweep DROP every production policy on the table. Opting in (setting
+// rowLevelSecurity, even empty) is the explicit signal that Policies is now
+// authoritative and absent policies should be dropped — exactly like
+// foreignKeys/checks/indexes are authoritative for an existing table.
+//
+// It must NOT be called in the create-table branch (CreateTableStatements emits
+// the enable/force/policies for a brand-new table, where there is nothing to
+// drop and no guard is needed).
+func BuildRowLevelSecurityStatements(p *PostgresConnection, tableName string, postgresTableSchema *schemasv1alpha4.PostgresqlTableSchema) ([]string, error) {
+	rls := postgresTableSchema.RowLevelSecurity
+	if rls == nil {
+		// Not opted in: leave RLS flags and policies entirely unmanaged.
+		return []string{}, nil
+	}
+
+	statements := []string{}
+
+	// --- A) ENABLE / FORCE toggles -------------------------------------------
+	current, err := p.GetTableRowSecurity(tableName)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get current row level security")
+	}
+
+	// Enable/Force are tri-state strings ("" = unmanaged) so they survive the gob
+	// RPC boundary intact (a *bool=false would arrive as nil). A toggle is emitted
+	// only when the desired state differs from the introspected state, which gives
+	// idempotency (an already-correct table emits nothing).
+	enableStmt, err := rowSecurityToggleStatement(tableName, rls.Enable, current.Enabled, "enable", "disable", enableRowLevelSecurityStatement)
+	if err != nil {
+		return nil, err
+	}
+	if enableStmt != "" {
+		statements = append(statements, enableStmt)
+	}
+
+	forceStmt, err := rowSecurityToggleStatement(tableName, rls.Force, current.Forced, "force", "noforce", forceRowLevelSecurityStatement)
+	if err != nil {
+		return nil, err
+	}
+	if forceStmt != "" {
+		statements = append(statements, forceStmt)
+	}
+
+	// --- B) Policies (two-pass guarded create/drop/recreate) ------------------
+	currentPolicies, err := p.ListTablePolicies(tableName)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to list table policies")
+	}
+
+	droppedPolicies := []string{}
+
+	// Pass 1 over DESIRED: create new policies; drop+recreate a same-named policy
+	// whose STRUCTURAL attributes (command/permissive/roles) changed.
+	for _, policy := range postgresTableSchema.Policies {
+		if policy.Name == "" {
+			// An unnamed policy cannot be matched against pg_policy nor dropped, so
+			// it cannot be managed. Fail loudly rather than emit an untrackable CREATE
+			// (mirrors BuildTriggerStatements' unnamed-trigger guard).
+			return nil, errors.New("policy requires a name to be managed on an existing table")
+		}
+
+		desired := types.PostgresqlSchemaPolicyToPolicy(policy)
+
+		var matched *types.Policy
+		for _, currentPolicy := range currentPolicies {
+			if currentPolicy.Name == policy.Name {
+				matched = currentPolicy
+				break
+			}
+		}
+
+		if matched == nil {
+			// New policy: CREATE POLICY has no IF NOT EXISTS, but the diff proves it
+			// is absent, so emit just the create.
+			statements = append(statements, CreatePolicyStatement(tableName, policy))
+			continue
+		}
+
+		if matched.AttributesEqual(desired) {
+			// Same name, same structural attributes. We deliberately do NOT recreate
+			// on a USING/WITH CHECK expression difference: pg_get_expr re-renders
+			// expressions canonically, so a raw spec expression rarely matches the
+			// introspected text byte-for-byte, and an unconditional drop+recreate
+			// would churn every plan AND open a row-visibility gap while the policy is
+			// briefly absent. An expression change therefore requires the policy to be
+			// renamed or manually dropped (documented in PostgresqlTablePolicy and the
+			// Policy.AttributesEqual doc). Treat this as a no-op.
+			continue
+		}
+
+		// Same name, different structural attributes. There is no ALTER POLICY that
+		// can change command, and CREATE POLICY has no IF NOT EXISTS, so emit a
+		// guarded drop immediately followed by the create (applies atomically
+		// per-policy in plan order). Record the name so pass 2 does not drop it again.
+		statements = append(statements, RemovePolicyStatement(tableName, matched.Name))
+		statements = append(statements, CreatePolicyStatement(tableName, policy))
+		droppedPolicies = append(droppedPolicies, matched.Name)
+	}
+
+	// Pass 2 over EXISTING: drop any current policy absent from the desired set.
+	// Reached ONLY for a policy the user removed from an opted-in spec — this is
+	// the authoritative-drop path, and every drop is IF EXISTS guarded.
+	for _, currentPolicy := range currentPolicies {
+		isDesired := false
+		for _, policy := range postgresTableSchema.Policies {
+			if policy.Name == currentPolicy.Name {
+				isDesired = true
+				break
+			}
+		}
+		if isDesired {
+			continue
+		}
+
+		alreadyDropped := false
+		for _, dropped := range droppedPolicies {
+			if dropped == currentPolicy.Name {
+				alreadyDropped = true
+				break
+			}
+		}
+		if alreadyDropped {
+			continue
+		}
+
+		statements = append(statements, RemovePolicyStatement(tableName, currentPolicy.Name))
+	}
 
 	return statements, nil
 }
