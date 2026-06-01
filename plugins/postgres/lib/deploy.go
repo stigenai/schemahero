@@ -158,6 +158,15 @@ func PlanPostgresTable(uri string, tableName string, postgresTableSchema *schema
 	}
 	statements = append(statements, exclusionConstraintStatements...)
 
+	// trigger changes (emitted last of the schema statements: a trigger can
+	// reference a newly-added column or function, so they must exist first.
+	// NOT emitted for a brand-new table — CreateTableStatements already does that.)
+	triggerStatements, err := BuildTriggerStatements(p, tableName, postgresTableSchema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to build trigger statements")
+	}
+	statements = append(statements, triggerStatements...)
+
 	statements = append(statements, seedDataStatements...)
 
 	return statements, nil

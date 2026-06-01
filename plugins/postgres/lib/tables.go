@@ -358,6 +358,74 @@ order by con.conname`
 	return exclusionConstraints, nil
 }
 
+// pgTrigger is the introspected form of a user trigger: its name plus the
+// canonical definition reported by pg_get_triggerdef. It is plugin-local (not
+// exported, not part of pkg/database/types and not on the RPC interface) because
+// BuildTriggerStatements calls ListTableTriggers in-process with the concrete
+// connection — the List* interface methods exist only for the legacy
+// cross-process planner. Definition is stored raw; normalization happens in the
+// comparator so the raw value stays available for debugging.
+type pgTrigger struct {
+	Name       string
+	Definition string
+}
+
+// ListTableTriggers returns the user-defined triggers on tableName.
+//
+// The tgisinternal=false filter is load-bearing: it drops BOTH system-internal
+// triggers AND the auto-generated RI/constraint triggers backing foreign keys.
+// Without it, every FK's internal triggers would surface as unmanaged triggers
+// and the diff would emit spurious DROPs of system triggers (breaking
+// referential integrity). User-declared CREATE CONSTRAINT TRIGGERs are NOT
+// internal and correctly still appear (they are user-managed).
+//
+// pg_get_triggerdef(oid, true) renders the complete, canonical
+// "CREATE TRIGGER ... ON schema.table ... EXECUTE FUNCTION fn(...)" with
+// fully schema-qualified identifiers (PG12+ always uses EXECUTE FUNCTION). It is
+// the safest single source of truth for comparison and avoids reconstructing the
+// definition from the tgtype bitmask.
+func (p *PostgresConnection) ListTableTriggers(tableName string) ([]pgTrigger, error) {
+	schema := p.schema // Default to connection schema
+	actualTableName := tableName
+
+	if strings.Contains(tableName, ".") {
+		parts := strings.SplitN(tableName, ".", 2)
+		schema = parts[0]
+		actualTableName = parts[1]
+	}
+
+	query := `select t.tgname,
+		pg_get_triggerdef(t.oid, true) as def
+	from pg_trigger t
+		join pg_class c on c.oid = t.tgrelid
+		join pg_namespace n on n.oid = c.relnamespace
+	where c.relname = $1
+		and n.nspname = $2
+		and t.tgisinternal = false
+	order by t.tgname`
+
+	rows, err := p.conn.Query(context.Background(), query, actualTableName, schema)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to query triggers")
+	}
+	defer rows.Close()
+
+	triggers := make([]pgTrigger, 0)
+	for rows.Next() {
+		var tgname, def string
+		if err := rows.Scan(&tgname, &def); err != nil {
+			return nil, err
+		}
+
+		triggers = append(triggers, pgTrigger{
+			Name:       tgname,
+			Definition: def,
+		})
+	}
+
+	return triggers, nil
+}
+
 func (p *PostgresConnection) GetTablePrimaryKey(tableName string) (*types.KeyConstraint, error) {
 	schema := p.schema // Default to connection schema
 	actualTableName := tableName

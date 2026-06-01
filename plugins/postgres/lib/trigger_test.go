@@ -125,6 +125,72 @@ func Test_triggerCreateStatement(t *testing.T) {
 	}
 }
 
+func Test_dropTriggerStatement(t *testing.T) {
+	tests := []struct {
+		name              string
+		triggerName       string
+		tableName         string
+		expectedStatement string
+	}{
+		{
+			name:              "bare table",
+			triggerName:       "tt",
+			tableName:         "users",
+			expectedStatement: `drop trigger if exists "tt" on "users"`,
+		},
+		{
+			name:              "schema-qualified table",
+			triggerName:       "tt",
+			tableName:         "app.users",
+			expectedStatement: `drop trigger if exists "tt" on "app"."users"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := dropTriggerStatement(test.triggerName, test.tableName)
+			assert.Equal(t, test.expectedStatement, actual)
+		})
+	}
+}
+
+func Test_normalizeTriggerDefinition(t *testing.T) {
+	tests := []struct {
+		name string
+		a    string
+		b    string
+	}{
+		{
+			// EXECUTE PROCEDURE (what triggerCreateStatement may emit) and
+			// EXECUTE FUNCTION (what pg_get_triggerdef emits on PG12+) are synonyms
+			// and must normalize equal.
+			name: "execute procedure equals execute function",
+			a:    `create trigger "tt" after insert on "users" for each row execute procedure fn()`,
+			b:    `CREATE TRIGGER tt AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION fn()`,
+		},
+		{
+			name: "case and whitespace collapse, trailing semicolon",
+			a:    `create trigger "tt" after insert on "users" for each row execute function fn()`,
+			b: `create   trigger "tt"
+				after insert on "users"   for each row execute function fn();`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, normalizeTriggerDefinition(test.a), normalizeTriggerDefinition(test.b))
+		})
+	}
+}
+
+func Test_normalizeTriggerDefinition_distinguishesDifferent(t *testing.T) {
+	// A genuine difference (different event) must NOT normalize equal, otherwise
+	// the diff would miss a real change.
+	a := `create trigger "tt" after insert on "users" for each row execute function fn()`
+	b := `create trigger "tt" after update on "users" for each row execute function fn()`
+	assert.NotEqual(t, normalizeTriggerDefinition(a), normalizeTriggerDefinition(b))
+}
+
 func Test_triggerEventSyntax(t *testing.T) {
 	tests := []struct {
 		name              string
