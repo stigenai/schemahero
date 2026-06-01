@@ -86,7 +86,8 @@ func dropTriggerStatement(triggerName string, tableName string) string {
 //   - removes double-quote identifier delimiters,
 //   - collapses internal whitespace runs to a single space and trims,
 //   - strips a trailing ';',
-//   - canonicalizes "execute procedure" -> "execute function".
+//   - canonicalizes "execute procedure" -> "execute function",
+//   - strips the redundant "public." schema qualifier from every identifier.
 //
 // This absorbs the cosmetic differences between what triggerCreateStatement
 // emits and what pg_get_triggerdef(oid, true) reports:
@@ -101,15 +102,18 @@ func dropTriggerStatement(triggerName string, tableName string) string {
 //     emits "EXECUTE FUNCTION", whereas triggerCreateStatement may emit
 //     "EXECUTE PROCEDURE" (legacy ExecuteProcedure or Execute.Type=Procedure);
 //     they are exact synonyms, so the token is collapsed.
-//
-// One cosmetic gap it does NOT reconcile: pg_get_triggerdef fully
-// schema-qualifies the function ("public.fn()" vs a bare "fn()") and the table.
-// When those differ the comparator reports a change and we emit a benign,
-// IF-EXISTS-guarded drop+recreate of an identical trigger — safe (no data
-// touched) but not a pure no-op. We deliberately do NOT requalify identifiers by
-// hand (the fork already shipped a schema-qualification bug); the integration
-// suite covers the common public-schema / already-qualified cases where this
-// normalizes to equal.
+//   - Schema qualification: pg_get_triggerdef FULLY schema-qualifies both the
+//     table and the executed function ("ON public.users ... EXECUTE FUNCTION
+//     public.fn()"), whereas triggerCreateStatement omits the schema for the
+//     default "public" schema ("ON users ... EXECUTE FUNCTION fn()"). Without
+//     reconciling this, a perfectly idempotent trigger on a public-schema
+//     function would churn (a guarded but pointless drop+recreate) on EVERY plan.
+//     stripRedundantPublicSchema drops the implicit "public." qualifier from both
+//     sides so the natural bare form and the catalog's qualified form compare
+//     equal. A function in a non-default schema is still rendered with that schema
+//     on both sides (the spec must set execute.schema), so it is unaffected; a
+//     literal containing "public." is not — only a space-delimited schema
+//     qualifier preceding an identifier is stripped.
 func normalizeTriggerDefinition(def string) string {
 	s := strings.ToLower(def)
 	s = strings.ReplaceAll(s, `"`, "")
@@ -117,7 +121,57 @@ func normalizeTriggerDefinition(def string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimSuffix(s, ";")
 	s = strings.ReplaceAll(s, "execute procedure ", "execute function ")
+	s = stripRedundantPublicSchema(s)
 	return s
+}
+
+// stripRedundantPublicSchema removes the implicit "public." schema qualifier that
+// pg_get_triggerdef prepends to identifiers (the table and the executed function),
+// so a definition that qualifies them and one that leaves them bare compare equal.
+//
+// It operates on an already-lowercased, whitespace-collapsed, unquoted string and
+// only removes "public." when it appears as a schema qualifier: immediately after
+// a word boundary (start, space, or '(') and immediately followed by an identifier
+// start character. That guards a string literal or a column literally named
+// "public" from being mangled — only the "public.<ident>" qualifier shape is
+// rewritten to "<ident>".
+func stripRedundantPublicSchema(s string) string {
+	const qualifier = "public."
+
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if hasQualifierAt(s, i, qualifier) {
+			i += len(qualifier)
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// hasQualifierAt reports whether the schema qualifier q (e.g. "public.") occurs at
+// index i as a real qualifier: preceded by a word boundary (start of string, a
+// space, or an opening paren) and followed by an identifier-start character. This
+// avoids stripping "public." when it is part of a larger token (e.g. "mypublic.x")
+// or not actually qualifying an identifier.
+func hasQualifierAt(s string, i int, q string) bool {
+	if i+len(q) > len(s) || s[i:i+len(q)] != q {
+		return false
+	}
+	if i > 0 {
+		prev := s[i-1]
+		if prev != ' ' && prev != '(' {
+			return false
+		}
+	}
+	next := i + len(q)
+	if next >= len(s) {
+		return false
+	}
+	c := s[next]
+	isIdentStart := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+	return isIdentStart
 }
 
 // BuildTriggerStatements diffs the triggers declared in postgresTableSchema

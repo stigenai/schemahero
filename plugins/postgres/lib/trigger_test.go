@@ -191,6 +191,28 @@ func Test_normalizeTriggerDefinition_distinguishesDifferent(t *testing.T) {
 	assert.NotEqual(t, normalizeTriggerDefinition(a), normalizeTriggerDefinition(b))
 }
 
+func Test_normalizeTriggerDefinition_stripsRedundantPublicSchema(t *testing.T) {
+	// MEDIUM-2 regression: triggerCreateStatement omits the schema for the default
+	// "public" schema (bare "users" / "fn()"), but pg_get_triggerdef FULLY
+	// schema-qualifies both the table and the function ("public.users" /
+	// "public.fn()"). These must normalize EQUAL, or an idempotent trigger on a
+	// public-schema function would churn (a guarded but pointless drop+recreate) on
+	// every plan.
+	desired := `create trigger "tt" after insert on "users" for each row execute function fn()`
+	introspected := `CREATE TRIGGER tt AFTER INSERT ON public.users FOR EACH ROW EXECUTE FUNCTION public.fn()`
+	assert.Equal(t, normalizeTriggerDefinition(desired), normalizeTriggerDefinition(introspected))
+}
+
+func Test_normalizeTriggerDefinition_keepsNonPublicSchema(t *testing.T) {
+	// A function in a NON-default schema must still be distinguished: stripping
+	// only "public." must not collapse "audit.fn()" to "fn()", so a trigger whose
+	// spec forgot the schema is correctly seen as different (not silently treated
+	// as equal).
+	bare := `create trigger "tt" after insert on "users" for each row execute function fn()`
+	auditQualified := `create trigger "tt" after insert on "users" for each row execute function audit.fn()`
+	assert.NotEqual(t, normalizeTriggerDefinition(bare), normalizeTriggerDefinition(auditQualified))
+}
+
 func Test_triggerEventSyntax(t *testing.T) {
 	tests := []struct {
 		name              string
