@@ -46,7 +46,17 @@ func CanonicalizeSQLExpr(s string) string {
 			b.WriteRune(r)
 		}
 	}
-	return strings.TrimSpace(b.String())
+	// Normalize whitespace around commas: PostgreSQL renders list/array separators
+	// as ", " (comma + space), while a hand-authored spec usually writes ",". The
+	// surrounding whitespace carries no SQL meaning, so dropping it on both sides
+	// makes the two forms compare equal — otherwise a CHECK/index/EXCLUDE using a
+	// list literal such as "x = ANY (ARRAY['a','b'])" churns drop+recreate on every
+	// plan against pg's stored "ARRAY['a'::text, 'b'::text]". Whitespace has already
+	// been collapsed to single spaces above, so two replacements suffice.
+	out := strings.TrimSpace(b.String())
+	out = strings.ReplaceAll(out, ", ", ",")
+	out = strings.ReplaceAll(out, " ,", ",")
+	return out
 }
 
 // stripTypeCasts removes PostgreSQL "::type" cast suffixes, including ones with a

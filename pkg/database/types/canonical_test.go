@@ -77,6 +77,22 @@ func Test_CanonicalizeSQLExpr_naturalEqualsCanonical(t *testing.T) {
 			natural:   "a AND b",
 			canonical: "(a and b)",
 		},
+		{
+			// PostgreSQL renders list/array separators as ", " (comma + space) and
+			// adds a ::text cast to each element; a spec authoring "ARRAY['a','b']"
+			// (no spaces) must still canonicalize equal, or a "= ANY (ARRAY[...])"
+			// CHECK — common in the cell schema (status/severity/enum guards) —
+			// drops+recreates on every plan. Found via plan-capture, 2026-06-02.
+			name:      "ANY(ARRAY[...]) list authored without comma spaces",
+			natural:   "provider = ANY (ARRAY['aws','gcp','azure'])",
+			canonical: "(provider = ANY (ARRAY['aws'::text, 'gcp'::text, 'azure'::text]))",
+		},
+		{
+			// Same comma-spacing gap inside a multi-argument function call.
+			name:      "multi-arg function call without comma space",
+			natural:   "tenant_id = current_setting('app.tenant',true)::uuid",
+			canonical: "(tenant_id = (current_setting('app.tenant', true))::uuid)",
+		},
 	}
 
 	for _, test := range tests {
