@@ -26,14 +26,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 )
 
-// defaultManagerTagStigen is the stigen fork image tag used when the
-// HelmRelease does not pass --manager-tag explicitly. It must match an
-// image that has actually been pushed to stigenai/schemahero-manager on
-// Docker Hub. Do NOT replace with version.Version() — that value is
-// derived from `git describe` at build time and produces tags that were
-// never pushed (e.g. "0.24.0-1-gc6c63c9f"), causing ImagePullBackOff on
-// every per-Database child StatefulSet.
-const defaultManagerTagStigen = "0.22.1-stigen.3"
+// defaultManagerTagStigen is the stigen fork image tag the operator gives
+// the per-Database child controller StatefulSet (the ACTUAL migration
+// planner) when the HelmRelease does not pass --manager-tag explicitly.
+//
+// It must match an image that has actually been pushed to
+// stigenai/schemahero-manager on Docker Hub. Do NOT replace with
+// version.Version() — that value is `git describe`-derived at build time
+// and produces tags that were never pushed (e.g. "0.24.0-1-gc6c63c9f"),
+// causing ImagePullBackOff on every child StatefulSet.
+//
+// BUMP THIS to match the operator image tag on every release. A stale
+// default silently runs the planner on an OLD binary even when the
+// operator itself is new — e.g. this was pinned at "0.22.1-stigen.3"
+// (pre-extended-fields) while the operator ran "0.24.0-stigen.1", so the
+// planner stripped CHECK constraints and partial-index WHERE clauses on
+// every cell plan (root-caused 2026-06-02). As a defense-in-depth, the
+// stigen-flux schemahero HelmRelease now ALSO passes --manager-tag
+// explicitly (PR #648), so this constant is the belt-and-suspenders
+// fallback rather than the sole source of the planner tag.
+const defaultManagerTagStigen = "0.24.0-stigen.1"
 
 func RunCmd() *cobra.Command {
 	cmd := &cobra.Command{
