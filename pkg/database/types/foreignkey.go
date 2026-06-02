@@ -195,7 +195,7 @@ func GeneratePostgresqlFKName(tableName string, schemaForeignKey *schemasv1alpha
 		return schemaForeignKey.Name
 	}
 
-	return fmt.Sprintf("%s_%s_fkey", tableName, strings.Join(schemaForeignKey.Columns, "_"))
+	return fmt.Sprintf("%s_%s_fkey", bareTableName(tableName), strings.Join(schemaForeignKey.Columns, "_"))
 }
 
 func GenerateSqliteFKName(tableName string, schemaForeignKey *schemasv1alpha4.SqliteTableForeignKey) string {

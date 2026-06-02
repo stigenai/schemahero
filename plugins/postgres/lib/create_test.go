@@ -151,6 +151,85 @@ func Test_CreateTableStatement(t *testing.T) {
 				`create trigger "tgr" after insert on "simple" for each row execute procedure test()`,
 			},
 		},
+		{
+			name: "with check constraint emits inline clause",
+			tableSchema: &schemasv1alpha4.PostgresqlTableSchema{
+				PrimaryKey: []string{
+					"id",
+				},
+				Columns: []*schemasv1alpha4.PostgresqlTableColumn{
+					{
+						Name: "id",
+						Type: "integer",
+					},
+					{
+						Name: "age",
+						Type: "integer",
+					},
+				},
+				Checks: []*schemasv1alpha4.PostgresqlTableCheckConstraint{
+					{
+						Name:       "simple_age_nonneg",
+						Expression: "age >= 0",
+					},
+				},
+			},
+			tableName: "simple",
+			expectedStatements: []string{
+				`create table "simple" ("id" integer, "age" integer, primary key ("id"), constraint "simple_age_nonneg" check (age >= 0))`,
+			},
+		},
+		{
+			name: "schema-qualified table with generated check name keeps name free of a dot",
+			tableSchema: &schemasv1alpha4.PostgresqlTableSchema{
+				Schema: "app",
+				Columns: []*schemasv1alpha4.PostgresqlTableColumn{
+					{
+						Name: "priority",
+						Type: "integer",
+					},
+				},
+				Checks: []*schemasv1alpha4.PostgresqlTableCheckConstraint{
+					{
+						Expression: "priority > 0",
+					},
+				},
+			},
+			tableName: "events",
+			expectedStatements: []string{
+				`create table "app"."events" ("priority" integer, constraint "events_priority_0_check" check (priority > 0))`,
+			},
+		},
+		{
+			name: "with exclusion constraint emits inline clause",
+			tableSchema: &schemasv1alpha4.PostgresqlTableSchema{
+				PrimaryKey: []string{
+					"id",
+				},
+				Columns: []*schemasv1alpha4.PostgresqlTableColumn{
+					{
+						Name: "id",
+						Type: "integer",
+					},
+					{
+						Name: "during",
+						Type: "daterange",
+					},
+				},
+				ExclusionConstraints: []*schemasv1alpha4.PostgresqlTableExclusionConstraint{
+					{
+						Name: "reservations_during_excl",
+						Items: []*schemasv1alpha4.PostgresqlTableExclusionConstraintItem{
+							{Column: "during", Operator: "&&"},
+						},
+					},
+				},
+			},
+			tableName: "reservations",
+			expectedStatements: []string{
+				`create table "reservations" ("id" integer, "during" daterange, primary key ("id"), constraint "reservations_during_excl" exclude using "gist" ("during" with &&))`,
+			},
+		},
 	}
 
 	for _, test := range tests {

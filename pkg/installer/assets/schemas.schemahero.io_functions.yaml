@@ -118,6 +118,11 @@ spec:
                         description: Schema is the schema the function should be saved
                           in
                         type: string
+                      securityDefiner:
+                        description: |-
+                          SecurityDefiner runs the function with the privileges of its owner
+                          (SECURITY DEFINER) rather than the caller (the default, SECURITY INVOKER).
+                        type: boolean
                     required:
                     - as
                     - lang

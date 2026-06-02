@@ -52,12 +52,84 @@ type PostgresqlTableForeignKey struct {
 	Name       string                              `json:"name,omitempty" yaml:"name,omitempty"`
 }
 
+// PostgresqlTableCheckConstraint is a table-level CHECK constraint.
+type PostgresqlTableCheckConstraint struct {
+	// Name is the constraint name. Optional; if empty a deterministic name
+	// "<bareTable>_<sanitized-expr>_check" is generated. Setting Name explicitly
+	// is strongly recommended: expression-derived names are fragile (near-identical
+	// expressions can collide, and long expressions exceed PostgreSQL's 63-char
+	// identifier limit, silently truncating and breaking the diff).
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	// Expression is the raw boolean SQL placed inside CHECK ( ... ), e.g.
+	// "age >= 0" or "status in ('a','b')". It is emitted verbatim (it is already
+	// SQL, like an FK references clause) and is NOT quoted or escaped.
+	Expression string `json:"expression" yaml:"expression"`
+}
+
+// PostgresqlTableExclusionConstraintItem is one "element WITH operator" pair of an
+// EXCLUDE constraint, e.g. {Column: "room_id", Operator: "="} or
+// {Expression: "tstzrange(starts_at, ends_at)", Operator: "&&"}. Exactly one of
+// Column or Expression must be set.
+// +kubebuilder:validation:ExactlyOneOf=column;expression
+type PostgresqlTableExclusionConstraintItem struct {
+	// Column is a plain column reference. It is identifier-quoted on emit.
+	Column string `json:"column,omitempty" yaml:"column,omitempty"`
+	// Expression is a raw SQL element expression, e.g. "tstzrange(starts_at, ends_at)".
+	// It is emitted verbatim inside parentheses (never identifier-quoted).
+	Expression string `json:"expression,omitempty" yaml:"expression,omitempty"`
+	// Operator is the PostgreSQL operator token used to compare this element across
+	// rows, e.g. "=", "&&", "<@". It is emitted raw (it is an operator, not an identifier).
+	Operator string `json:"operator" yaml:"operator"`
+}
+
+// PostgresqlTableExclusionConstraint is a table-level EXCLUDE constraint, e.g.
+// EXCLUDE USING gist (room_id WITH =, during WITH &&) WHERE (room_id IS NOT NULL).
+//
+// An EXCLUDE present on the table but absent from PostgresqlTableSchema.ExclusionConstraints
+// IS DROPPED on apply (the same authoritative behavior as foreignKeys, checks, and
+// indexes). EXCLUDE constraints with scalar equality operators under the default gist
+// access method require the btree_gist extension; SchemaHero does NOT install it.
+type PostgresqlTableExclusionConstraint struct {
+	// Name is the constraint name. Optional; if empty a deterministic name
+	// "<bareTable>_<element>_excl" is generated. Setting Name explicitly is
+	// strongly recommended (generated names can collide or exceed the 63-char limit).
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	// Using is the index access method backing the constraint; defaults to gist.
+	Using string `json:"using,omitempty" yaml:"using,omitempty"`
+	// Items is the ordered list of "element WITH operator" pairs. Order is
+	// significant and is compared order-sensitively by the diff.
+	Items []*PostgresqlTableExclusionConstraintItem `json:"items" yaml:"items"`
+	// Where is a partial-constraint predicate (raw SQL, without the WHERE keyword),
+	// e.g. "room_id IS NOT NULL". Emitted verbatim.
+	Where string `json:"where,omitempty" yaml:"where,omitempty"`
+	// With holds index storage parameters, e.g. {fillfactor: "70"}. These are
+	// emitted on CREATE but NOT compared by the diff (introspection cannot cheaply
+	// recover them), matching how the FK/index diffs compare structurally.
+	With map[string]string `json:"with,omitempty" yaml:"with,omitempty"`
+}
+
 type PostgresqlTableIndex struct {
-	Columns  []string          `json:"columns" yaml:"columns"`
-	Name     string            `json:"name,omitempty" yaml:"name,omitempty"`
-	IsUnique bool              `json:"isUnique,omitempty" yaml:"isUnique,omitempty"`
-	Type     string            `json:"type,omitempty" yaml:"type,omitempty"`
-	With     map[string]string `json:"with,omitempty" yaml:"with,omitempty"`
+	Columns  []string `json:"columns,omitempty" yaml:"columns,omitempty"`
+	Name     string   `json:"name,omitempty" yaml:"name,omitempty"`
+	IsUnique bool     `json:"isUnique,omitempty" yaml:"isUnique,omitempty"`
+	// Type is the index method (access method): btree (default) | hash | gin | gist | brin | spgist.
+	Type string `json:"type,omitempty" yaml:"type,omitempty"`
+	// With holds index storage parameters, e.g. {fillfactor: "70"}.
+	With map[string]string `json:"with,omitempty" yaml:"with,omitempty"`
+	// Where is a partial-index predicate (raw SQL, without the WHERE keyword), e.g. "phone <> ''".
+	Where string `json:"where,omitempty" yaml:"where,omitempty"`
+	// Expressions are functional-index column expressions (raw SQL), e.g. ["lower(email)"].
+	Expressions []string `json:"expressions,omitempty" yaml:"expressions,omitempty"`
+	// SortedColumns are index columns with explicit ordering (ASC/DESC, NULLS FIRST/LAST).
+	SortedColumns []*PostgresqlTableIndexColumn `json:"sortedColumns,omitempty" yaml:"sortedColumns,omitempty"`
+}
+
+type PostgresqlTableIndexColumn struct {
+	Column string `json:"column" yaml:"column"`
+	//+kubebuilder:validation:Enum=ASC;DESC
+	Sort string `json:"sort,omitempty" yaml:"sort,omitempty"`
+	//+kubebuilder:validation:Enum=FIRST;LAST
+	Nulls string `json:"nulls,omitempty" yaml:"nulls,omitempty"`
 }
 
 type PostgresqlTableColumnConstraints struct {
@@ -76,18 +148,99 @@ type PostgresqlTableColumn struct {
 	Default     *string                           `json:"default,omitempty" yaml:"default,omitempty"`
 }
 
+// PostgresqlTableRowLevelSecurity toggles table-level row-level security via
+// ALTER TABLE ... ENABLE/DISABLE ROW LEVEL SECURITY and ... [NO] FORCE ROW
+// LEVEL SECURITY. Presence of this object (even empty) is the opt-in signal that
+// the table's POLICIES are managed by SchemaHero: when it is nil, neither the
+// RLS toggles NOR the policies are touched, so an existing RLS-enabled table is
+// never accidentally wiped by a spec that simply omits these fields.
+//
+// Enable and Force are STRING enums (not *bool) on purpose: the plugin runs in a
+// separate process and the schema crosses a gob RPC boundary, where a *bool that
+// points to false decodes back as nil (the gob zero-value-pointer behavior — the
+// same reason a column's notNull:false is indistinguishable from unset across the
+// boundary). A string round-trips reliably, so the three states ("" / enable /
+// disable) survive intact. The empty-string default leaves the flag UNMANAGED,
+// which is the safe default for a security feature: an empty rowLevelSecurity{}
+// never silently DISABLEs RLS — it only opts policies into management.
+type PostgresqlTableRowLevelSecurity struct {
+	// Enable controls ALTER TABLE ... ENABLE/DISABLE ROW LEVEL SECURITY.
+	// "" (default) = leave the current setting unmanaged (emit no toggle);
+	// "enable" = ENABLE; "disable" = DISABLE.
+	//+kubebuilder:validation:Enum=enable;disable
+	Enable string `json:"enable,omitempty" yaml:"enable,omitempty"`
+	// Force controls ALTER TABLE ... [NO] FORCE ROW LEVEL SECURITY (whether RLS
+	// also applies to the table owner). "" (default) = leave unmanaged;
+	// "force" = FORCE; "noforce" = NO FORCE.
+	//+kubebuilder:validation:Enum=force;noforce
+	Force string `json:"force,omitempty" yaml:"force,omitempty"`
+}
+
+// PostgresqlTablePolicy is a single CREATE POLICY definition. PostgreSQL has no
+// ALTER POLICY that can change a policy's command/permissive/roles and no
+// CREATE POLICY ... IF NOT EXISTS, so a policy whose structural attributes
+// change is dropped (DROP POLICY IF EXISTS) and recreated by the diff.
+type PostgresqlTablePolicy struct {
+	// Name is the policy name (unique per table). Required: an unnamed policy
+	// cannot be introspected, matched, or dropped by the diff.
+	Name string `json:"name" yaml:"name"`
+	// Command restricts the policy to a statement class. ALL is the PostgreSQL
+	// default and is emitted by omitting "FOR <cmd>" to keep re-plans idempotent.
+	//+kubebuilder:validation:Enum=ALL;SELECT;INSERT;UPDATE;DELETE
+	//+kubebuilder:default:=ALL
+	Command string `json:"command,omitempty" yaml:"command,omitempty"`
+	// Permissive selects PERMISSIVE (OR-combined, the default) or RESTRICTIVE
+	// (AND-combined) policy semantics. PERMISSIVE is emitted by omitting "AS
+	// RESTRICTIVE" to match the catalog default and keep re-plans idempotent.
+	//+kubebuilder:validation:Enum=PERMISSIVE;RESTRICTIVE
+	//+kubebuilder:default:=PERMISSIVE
+	Permissive string `json:"permissive,omitempty" yaml:"permissive,omitempty"`
+	// Roles are the database roles the policy applies TO. Empty => PUBLIC (the
+	// "TO" clause is omitted), which matches how pg_policy stores a PUBLIC policy.
+	Roles []string `json:"roles,omitempty" yaml:"roles,omitempty"`
+	// Using is the raw boolean SQL for the USING (row visibility) clause, e.g.
+	// "tenant_id = current_setting('app.tenant_id')::uuid". It is emitted verbatim
+	// inside parentheses (it is already SQL, like a CHECK expression) and is NEVER
+	// quoted or escaped.
+	Using *string `json:"using,omitempty" yaml:"using,omitempty"`
+	// WithCheck is the raw boolean SQL for the WITH CHECK (write validation)
+	// clause. Emitted verbatim inside parentheses, never quoted or escaped.
+	WithCheck *string `json:"withCheck,omitempty" yaml:"withCheck,omitempty"`
+}
+
 type PostgresqlTableSchema struct {
 	Schema      string                       `json:"schema,omitempty" yaml:"schema,omitempty"`
 	PrimaryKey  []string                     `json:"primaryKey,omitempty" yaml:"primaryKey,omitempty"`
 	ForeignKeys []*PostgresqlTableForeignKey `json:"foreignKeys,omitempty" yaml:"foreignKeys,omitempty"`
-	Indexes     []*PostgresqlTableIndex      `json:"indexes,omitempty" yaml:"indexes,omitempty"`
-	Columns     []*PostgresqlTableColumn     `json:"columns,omitempty" yaml:"columns,omitempty"`
-	IsDeleted   bool                         `json:"isDeleted,omitempty" yaml:"isDeleted,omitempty"`
+	// Checks is the authoritative list of table-level CHECK constraints. A CHECK
+	// present on the table but absent from this list IS DROPPED on apply (the same
+	// authoritative behavior as foreignKeys and indexes).
+	// +kubebuilder:validation:MaxItems=100
+	Checks  []*PostgresqlTableCheckConstraint `json:"checks,omitempty" yaml:"checks,omitempty"`
+	Indexes []*PostgresqlTableIndex           `json:"indexes,omitempty" yaml:"indexes,omitempty"`
+	// ExclusionConstraints is the authoritative list of table-level EXCLUDE
+	// constraints. An EXCLUDE present on the table but absent from this list IS
+	// DROPPED on apply (the same authoritative behavior as foreignKeys, checks,
+	// and indexes).
+	// +kubebuilder:validation:MaxItems=100
+	ExclusionConstraints []*PostgresqlTableExclusionConstraint `json:"exclusionConstraints,omitempty" yaml:"exclusionConstraints,omitempty"`
+	Columns              []*PostgresqlTableColumn              `json:"columns,omitempty" yaml:"columns,omitempty"`
+	IsDeleted            bool                                  `json:"isDeleted,omitempty" yaml:"isDeleted,omitempty"`
 	// Deprecated: this field should be avoided and one should use Triggers without json prefix instead
 	// +kubebuilder:validation:MaxItems=100
 	JSONTriggers []*PostgresqlTableTrigger `json:"json:triggers,omitempty" yaml:"json:triggers,omitempty"`
 	// +kubebuilder:validation:MaxItems=100
 	Triggers []*PostgresqlTableTrigger `json:"triggers,omitempty" yaml:"triggers,omitempty"`
+	// RowLevelSecurity opts the table into SchemaHero-managed row-level security.
+	// When set (even empty), the ENABLE/FORCE toggles are reconciled AND Policies
+	// becomes authoritative (a policy on the table but absent from Policies is
+	// DROPPED). When nil, neither RLS toggles nor policies are touched — so an
+	// existing RLS table is never silently wiped by a spec that omits these fields.
+	RowLevelSecurity *PostgresqlTableRowLevelSecurity `json:"rowLevelSecurity,omitempty" yaml:"rowLevelSecurity,omitempty"`
+	// Policies is the authoritative list of row-level security policies. It is
+	// reconciled ONLY when RowLevelSecurity is non-nil (see above).
+	// +kubebuilder:validation:MaxItems=100
+	Policies []*PostgresqlTablePolicy `json:"policies,omitempty" yaml:"policies,omitempty"`
 }
 
 type PostgresqlFunctionSchema struct {
@@ -112,6 +265,9 @@ type PostgresqlFunctionSchema struct {
 	// END;
 	// ```
 	As string `json:"as" yaml:"as"`
+	// SecurityDefiner runs the function with the privileges of its owner
+	// (SECURITY DEFINER) rather than the caller (the default, SECURITY INVOKER).
+	SecurityDefiner bool `json:"securityDefiner,omitempty" yaml:"securityDefiner,omitempty"`
 	// Aliases for compatibility
 	Body     string `json:"-" yaml:"-"`
 	Returns  string `json:"-" yaml:"-"`

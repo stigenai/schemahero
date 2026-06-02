@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: tables.schemas.schemahero.io
 spec:
   group: schemas.schemahero.io
@@ -136,6 +136,34 @@ spec:
                     type: object
                   cockroachdb:
                     properties:
+                      checks:
+                        description: |-
+                          Checks is the authoritative list of table-level CHECK constraints. A CHECK
+                          present on the table but absent from this list IS DROPPED on apply (the same
+                          authoritative behavior as foreignKeys and indexes).
+                        items:
+                          description: PostgresqlTableCheckConstraint is a table-level
+                            CHECK constraint.
+                          properties:
+                            expression:
+                              description: |-
+                                Expression is the raw boolean SQL placed inside CHECK ( ... ), e.g.
+                                "age >= 0" or "status in ('a','b')". It is emitted verbatim (it is already
+                                SQL, like an FK references clause) and is NOT quoted or escaped.
+                              type: string
+                            name:
+                              description: |-
+                                Name is the constraint name. Optional; if empty a deterministic name
+                                "<bareTable>_<sanitized-expr>_check" is generated. Setting Name explicitly
+                                is strongly recommended: expression-derived names are fragile (near-identical
+                                expressions can collide, and long expressions exceed PostgreSQL's 63-char
+                                identifier limit, silently truncating and breaking the diff).
+                              type: string
+                          required:
+                          - expression
+                          type: object
+                        maxItems: 100
+                        type: array
                       columns:
                         items:
                           properties:
@@ -159,6 +187,84 @@ spec:
                           - name
                           - type
                           type: object
+                        type: array
+                      exclusionConstraints:
+                        description: |-
+                          ExclusionConstraints is the authoritative list of table-level EXCLUDE
+                          constraints. An EXCLUDE present on the table but absent from this list IS
+                          DROPPED on apply (the same authoritative behavior as foreignKeys, checks,
+                          and indexes).
+                        items:
+                          description: |-
+                            PostgresqlTableExclusionConstraint is a table-level EXCLUDE constraint, e.g.
+                            EXCLUDE USING gist (room_id WITH =, during WITH &&) WHERE (room_id IS NOT NULL).
+
+                            An EXCLUDE present on the table but absent from PostgresqlTableSchema.ExclusionConstraints
+                            IS DROPPED on apply (the same authoritative behavior as foreignKeys, checks, and
+                            indexes). EXCLUDE constraints with scalar equality operators under the default gist
+                            access method require the btree_gist extension; SchemaHero does NOT install it.
+                          properties:
+                            items:
+                              description: |-
+                                Items is the ordered list of "element WITH operator" pairs. Order is
+                                significant and is compared order-sensitively by the diff.
+                              items:
+                                description: |-
+                                  PostgresqlTableExclusionConstraintItem is one "element WITH operator" pair of an
+                                  EXCLUDE constraint, e.g. {Column: "room_id", Operator: "="} or
+                                  {Expression: "tstzrange(starts_at, ends_at)", Operator: "&&"}. Exactly one of
+                                  Column or Expression must be set.
+                                properties:
+                                  column:
+                                    description: Column is a plain column reference.
+                                      It is identifier-quoted on emit.
+                                    type: string
+                                  expression:
+                                    description: |-
+                                      Expression is a raw SQL element expression, e.g. "tstzrange(starts_at, ends_at)".
+                                      It is emitted verbatim inside parentheses (never identifier-quoted).
+                                    type: string
+                                  operator:
+                                    description: |-
+                                      Operator is the PostgreSQL operator token used to compare this element across
+                                      rows, e.g. "=", "&&", "<@". It is emitted raw (it is an operator, not an identifier).
+                                    type: string
+                                required:
+                                - operator
+                                type: object
+                                x-kubernetes-validations:
+                                - message: exactly one of the fields in [column expression]
+                                    must be set
+                                  rule: '[has(self.column),has(self.expression)].filter(x,x==true).size()
+                                    == 1'
+                              type: array
+                            name:
+                              description: |-
+                                Name is the constraint name. Optional; if empty a deterministic name
+                                "<bareTable>_<element>_excl" is generated. Setting Name explicitly is
+                                strongly recommended (generated names can collide or exceed the 63-char limit).
+                              type: string
+                            using:
+                              description: Using is the index access method backing
+                                the constraint; defaults to gist.
+                              type: string
+                            where:
+                              description: |-
+                                Where is a partial-constraint predicate (raw SQL, without the WHERE keyword),
+                                e.g. "room_id IS NOT NULL". Emitted verbatim.
+                              type: string
+                            with:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                With holds index storage parameters, e.g. {fillfactor: "70"}. These are
+                                emitted on CREATE but NOT compared by the diff (introspection cannot cheaply
+                                recover them), matching how the FK/index diffs compare structurally.
+                              type: object
+                          required:
+                          - items
+                          type: object
+                        maxItems: 100
                         type: array
                       foreignKeys:
                         items:
@@ -195,14 +301,51 @@ spec:
                               items:
                                 type: string
                               type: array
+                            expressions:
+                              description: Expressions are functional-index column
+                                expressions (raw SQL), e.g. ["lower(email)"].
+                              items:
+                                type: string
+                              type: array
                             isUnique:
                               type: boolean
                             name:
                               type: string
+                            sortedColumns:
+                              description: SortedColumns are index columns with explicit
+                                ordering (ASC/DESC, NULLS FIRST/LAST).
+                              items:
+                                properties:
+                                  column:
+                                    type: string
+                                  nulls:
+                                    enum:
+                                    - FIRST
+                                    - LAST
+                                    type: string
+                                  sort:
+                                    enum:
+                                    - ASC
+                                    - DESC
+                                    type: string
+                                required:
+                                - column
+                                type: object
+                              type: array
                             type:
+                              description: 'Type is the index method (access method):
+                                btree (default) | hash | gin | gist | brin | spgist.'
                               type: string
-                          required:
-                          - columns
+                            where:
+                              description: Where is a partial-index predicate (raw
+                                SQL, without the WHERE keyword), e.g. "phone <> ''".
+                              type: string
+                            with:
+                              additionalProperties:
+                                type: string
+                              description: 'With holds index storage parameters, e.g.
+                                {fillfactor: "70"}.'
+                              type: object
                           type: object
                         type: array
                       isDeleted:
@@ -241,6 +384,7 @@ spec:
                                     required:
                                     - type
                                     type: object
+                                  maxItems: 100
                                   type: array
                                 schema:
                                   type: string
@@ -268,11 +412,106 @@ spec:
                           required:
                           - events
                           type: object
+                          x-kubernetes-validations:
+                          - message: exactly one of the fields in [execute executeProcedure]
+                              must be set
+                            rule: '[has(self.execute),has(self.executeProcedure)].filter(x,x==true).size()
+                              == 1'
+                        maxItems: 100
+                        type: array
+                      policies:
+                        description: |-
+                          Policies is the authoritative list of row-level security policies. It is
+                          reconciled ONLY when RowLevelSecurity is non-nil (see above).
+                        items:
+                          description: |-
+                            PostgresqlTablePolicy is a single CREATE POLICY definition. PostgreSQL has no
+                            ALTER POLICY that can change a policy's command/permissive/roles and no
+                            CREATE POLICY ... IF NOT EXISTS, so a policy whose structural attributes
+                            change is dropped (DROP POLICY IF EXISTS) and recreated by the diff.
+                          properties:
+                            command:
+                              default: ALL
+                              description: |-
+                                Command restricts the policy to a statement class. ALL is the PostgreSQL
+                                default and is emitted by omitting "FOR <cmd>" to keep re-plans idempotent.
+                              enum:
+                              - ALL
+                              - SELECT
+                              - INSERT
+                              - UPDATE
+                              - DELETE
+                              type: string
+                            name:
+                              description: |-
+                                Name is the policy name (unique per table). Required: an unnamed policy
+                                cannot be introspected, matched, or dropped by the diff.
+                              type: string
+                            permissive:
+                              default: PERMISSIVE
+                              description: |-
+                                Permissive selects PERMISSIVE (OR-combined, the default) or RESTRICTIVE
+                                (AND-combined) policy semantics. PERMISSIVE is emitted by omitting "AS
+                                RESTRICTIVE" to match the catalog default and keep re-plans idempotent.
+                              enum:
+                              - PERMISSIVE
+                              - RESTRICTIVE
+                              type: string
+                            roles:
+                              description: |-
+                                Roles are the database roles the policy applies TO. Empty => PUBLIC (the
+                                "TO" clause is omitted), which matches how pg_policy stores a PUBLIC policy.
+                              items:
+                                type: string
+                              type: array
+                            using:
+                              description: |-
+                                Using is the raw boolean SQL for the USING (row visibility) clause, e.g.
+                                "tenant_id = current_setting('app.tenant_id')::uuid". It is emitted verbatim
+                                inside parentheses (it is already SQL, like a CHECK expression) and is NEVER
+                                quoted or escaped.
+                              type: string
+                            withCheck:
+                              description: |-
+                                WithCheck is the raw boolean SQL for the WITH CHECK (write validation)
+                                clause. Emitted verbatim inside parentheses, never quoted or escaped.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        maxItems: 100
                         type: array
                       primaryKey:
                         items:
                           type: string
                         type: array
+                      rowLevelSecurity:
+                        description: |-
+                          RowLevelSecurity opts the table into SchemaHero-managed row-level security.
+                          When set (even empty), the ENABLE/FORCE toggles are reconciled AND Policies
+                          becomes authoritative (a policy on the table but absent from Policies is
+                          DROPPED). When nil, neither RLS toggles nor policies are touched — so an
+                          existing RLS table is never silently wiped by a spec that omits these fields.
+                        properties:
+                          enable:
+                            description: |-
+                              Enable controls ALTER TABLE ... ENABLE/DISABLE ROW LEVEL SECURITY.
+                              "" (default) = leave the current setting unmanaged (emit no toggle);
+                              "enable" = ENABLE; "disable" = DISABLE.
+                            enum:
+                            - enable
+                            - disable
+                            type: string
+                          force:
+                            description: |-
+                              Force controls ALTER TABLE ... [NO] FORCE ROW LEVEL SECURITY (whether RLS
+                              also applies to the table owner). "" (default) = leave unmanaged;
+                              "force" = FORCE; "noforce" = NO FORCE.
+                            enum:
+                            - force
+                            - noforce
+                            type: string
+                        type: object
                       schema:
                         type: string
                       triggers:
@@ -307,6 +546,7 @@ spec:
                                     required:
                                     - type
                                     type: object
+                                  maxItems: 100
                                   type: array
                                 schema:
                                   type: string
@@ -334,6 +574,12 @@ spec:
                           required:
                           - events
                           type: object
+                          x-kubernetes-validations:
+                          - message: exactly one of the fields in [execute executeProcedure]
+                              must be set
+                            rule: '[has(self.execute),has(self.executeProcedure)].filter(x,x==true).size()
+                              == 1'
+                        maxItems: 100
                         type: array
                     type: object
                   mysql:
@@ -424,6 +670,34 @@ spec:
                     type: object
                   postgres:
                     properties:
+                      checks:
+                        description: |-
+                          Checks is the authoritative list of table-level CHECK constraints. A CHECK
+                          present on the table but absent from this list IS DROPPED on apply (the same
+                          authoritative behavior as foreignKeys and indexes).
+                        items:
+                          description: PostgresqlTableCheckConstraint is a table-level
+                            CHECK constraint.
+                          properties:
+                            expression:
+                              description: |-
+                                Expression is the raw boolean SQL placed inside CHECK ( ... ), e.g.
+                                "age >= 0" or "status in ('a','b')". It is emitted verbatim (it is already
+                                SQL, like an FK references clause) and is NOT quoted or escaped.
+                              type: string
+                            name:
+                              description: |-
+                                Name is the constraint name. Optional; if empty a deterministic name
+                                "<bareTable>_<sanitized-expr>_check" is generated. Setting Name explicitly
+                                is strongly recommended: expression-derived names are fragile (near-identical
+                                expressions can collide, and long expressions exceed PostgreSQL's 63-char
+                                identifier limit, silently truncating and breaking the diff).
+                              type: string
+                          required:
+                          - expression
+                          type: object
+                        maxItems: 100
+                        type: array
                       columns:
                         items:
                           properties:
@@ -447,6 +721,84 @@ spec:
                           - name
                           - type
                           type: object
+                        type: array
+                      exclusionConstraints:
+                        description: |-
+                          ExclusionConstraints is the authoritative list of table-level EXCLUDE
+                          constraints. An EXCLUDE present on the table but absent from this list IS
+                          DROPPED on apply (the same authoritative behavior as foreignKeys, checks,
+                          and indexes).
+                        items:
+                          description: |-
+                            PostgresqlTableExclusionConstraint is a table-level EXCLUDE constraint, e.g.
+                            EXCLUDE USING gist (room_id WITH =, during WITH &&) WHERE (room_id IS NOT NULL).
+
+                            An EXCLUDE present on the table but absent from PostgresqlTableSchema.ExclusionConstraints
+                            IS DROPPED on apply (the same authoritative behavior as foreignKeys, checks, and
+                            indexes). EXCLUDE constraints with scalar equality operators under the default gist
+                            access method require the btree_gist extension; SchemaHero does NOT install it.
+                          properties:
+                            items:
+                              description: |-
+                                Items is the ordered list of "element WITH operator" pairs. Order is
+                                significant and is compared order-sensitively by the diff.
+                              items:
+                                description: |-
+                                  PostgresqlTableExclusionConstraintItem is one "element WITH operator" pair of an
+                                  EXCLUDE constraint, e.g. {Column: "room_id", Operator: "="} or
+                                  {Expression: "tstzrange(starts_at, ends_at)", Operator: "&&"}. Exactly one of
+                                  Column or Expression must be set.
+                                properties:
+                                  column:
+                                    description: Column is a plain column reference.
+                                      It is identifier-quoted on emit.
+                                    type: string
+                                  expression:
+                                    description: |-
+                                      Expression is a raw SQL element expression, e.g. "tstzrange(starts_at, ends_at)".
+                                      It is emitted verbatim inside parentheses (never identifier-quoted).
+                                    type: string
+                                  operator:
+                                    description: |-
+                                      Operator is the PostgreSQL operator token used to compare this element across
+                                      rows, e.g. "=", "&&", "<@". It is emitted raw (it is an operator, not an identifier).
+                                    type: string
+                                required:
+                                - operator
+                                type: object
+                                x-kubernetes-validations:
+                                - message: exactly one of the fields in [column expression]
+                                    must be set
+                                  rule: '[has(self.column),has(self.expression)].filter(x,x==true).size()
+                                    == 1'
+                              type: array
+                            name:
+                              description: |-
+                                Name is the constraint name. Optional; if empty a deterministic name
+                                "<bareTable>_<element>_excl" is generated. Setting Name explicitly is
+                                strongly recommended (generated names can collide or exceed the 63-char limit).
+                              type: string
+                            using:
+                              description: Using is the index access method backing
+                                the constraint; defaults to gist.
+                              type: string
+                            where:
+                              description: |-
+                                Where is a partial-constraint predicate (raw SQL, without the WHERE keyword),
+                                e.g. "room_id IS NOT NULL". Emitted verbatim.
+                              type: string
+                            with:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                With holds index storage parameters, e.g. {fillfactor: "70"}. These are
+                                emitted on CREATE but NOT compared by the diff (introspection cannot cheaply
+                                recover them), matching how the FK/index diffs compare structurally.
+                              type: object
+                          required:
+                          - items
+                          type: object
+                        maxItems: 100
                         type: array
                       foreignKeys:
                         items:
@@ -483,14 +835,51 @@ spec:
                               items:
                                 type: string
                               type: array
+                            expressions:
+                              description: Expressions are functional-index column
+                                expressions (raw SQL), e.g. ["lower(email)"].
+                              items:
+                                type: string
+                              type: array
                             isUnique:
                               type: boolean
                             name:
                               type: string
+                            sortedColumns:
+                              description: SortedColumns are index columns with explicit
+                                ordering (ASC/DESC, NULLS FIRST/LAST).
+                              items:
+                                properties:
+                                  column:
+                                    type: string
+                                  nulls:
+                                    enum:
+                                    - FIRST
+                                    - LAST
+                                    type: string
+                                  sort:
+                                    enum:
+                                    - ASC
+                                    - DESC
+                                    type: string
+                                required:
+                                - column
+                                type: object
+                              type: array
                             type:
+                              description: 'Type is the index method (access method):
+                                btree (default) | hash | gin | gist | brin | spgist.'
                               type: string
-                          required:
-                          - columns
+                            where:
+                              description: Where is a partial-index predicate (raw
+                                SQL, without the WHERE keyword), e.g. "phone <> ''".
+                              type: string
+                            with:
+                              additionalProperties:
+                                type: string
+                              description: 'With holds index storage parameters, e.g.
+                                {fillfactor: "70"}.'
+                              type: object
                           type: object
                         type: array
                       isDeleted:
@@ -529,6 +918,7 @@ spec:
                                     required:
                                     - type
                                     type: object
+                                  maxItems: 100
                                   type: array
                                 schema:
                                   type: string
@@ -556,11 +946,106 @@ spec:
                           required:
                           - events
                           type: object
+                          x-kubernetes-validations:
+                          - message: exactly one of the fields in [execute executeProcedure]
+                              must be set
+                            rule: '[has(self.execute),has(self.executeProcedure)].filter(x,x==true).size()
+                              == 1'
+                        maxItems: 100
+                        type: array
+                      policies:
+                        description: |-
+                          Policies is the authoritative list of row-level security policies. It is
+                          reconciled ONLY when RowLevelSecurity is non-nil (see above).
+                        items:
+                          description: |-
+                            PostgresqlTablePolicy is a single CREATE POLICY definition. PostgreSQL has no
+                            ALTER POLICY that can change a policy's command/permissive/roles and no
+                            CREATE POLICY ... IF NOT EXISTS, so a policy whose structural attributes
+                            change is dropped (DROP POLICY IF EXISTS) and recreated by the diff.
+                          properties:
+                            command:
+                              default: ALL
+                              description: |-
+                                Command restricts the policy to a statement class. ALL is the PostgreSQL
+                                default and is emitted by omitting "FOR <cmd>" to keep re-plans idempotent.
+                              enum:
+                              - ALL
+                              - SELECT
+                              - INSERT
+                              - UPDATE
+                              - DELETE
+                              type: string
+                            name:
+                              description: |-
+                                Name is the policy name (unique per table). Required: an unnamed policy
+                                cannot be introspected, matched, or dropped by the diff.
+                              type: string
+                            permissive:
+                              default: PERMISSIVE
+                              description: |-
+                                Permissive selects PERMISSIVE (OR-combined, the default) or RESTRICTIVE
+                                (AND-combined) policy semantics. PERMISSIVE is emitted by omitting "AS
+                                RESTRICTIVE" to match the catalog default and keep re-plans idempotent.
+                              enum:
+                              - PERMISSIVE
+                              - RESTRICTIVE
+                              type: string
+                            roles:
+                              description: |-
+                                Roles are the database roles the policy applies TO. Empty => PUBLIC (the
+                                "TO" clause is omitted), which matches how pg_policy stores a PUBLIC policy.
+                              items:
+                                type: string
+                              type: array
+                            using:
+                              description: |-
+                                Using is the raw boolean SQL for the USING (row visibility) clause, e.g.
+                                "tenant_id = current_setting('app.tenant_id')::uuid". It is emitted verbatim
+                                inside parentheses (it is already SQL, like a CHECK expression) and is NEVER
+                                quoted or escaped.
+                              type: string
+                            withCheck:
+                              description: |-
+                                WithCheck is the raw boolean SQL for the WITH CHECK (write validation)
+                                clause. Emitted verbatim inside parentheses, never quoted or escaped.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        maxItems: 100
                         type: array
                       primaryKey:
                         items:
                           type: string
                         type: array
+                      rowLevelSecurity:
+                        description: |-
+                          RowLevelSecurity opts the table into SchemaHero-managed row-level security.
+                          When set (even empty), the ENABLE/FORCE toggles are reconciled AND Policies
+                          becomes authoritative (a policy on the table but absent from Policies is
+                          DROPPED). When nil, neither RLS toggles nor policies are touched — so an
+                          existing RLS table is never silently wiped by a spec that omits these fields.
+                        properties:
+                          enable:
+                            description: |-
+                              Enable controls ALTER TABLE ... ENABLE/DISABLE ROW LEVEL SECURITY.
+                              "" (default) = leave the current setting unmanaged (emit no toggle);
+                              "enable" = ENABLE; "disable" = DISABLE.
+                            enum:
+                            - enable
+                            - disable
+                            type: string
+                          force:
+                            description: |-
+                              Force controls ALTER TABLE ... [NO] FORCE ROW LEVEL SECURITY (whether RLS
+                              also applies to the table owner). "" (default) = leave unmanaged;
+                              "force" = FORCE; "noforce" = NO FORCE.
+                            enum:
+                            - force
+                            - noforce
+                            type: string
+                        type: object
                       schema:
                         type: string
                       triggers:
@@ -595,6 +1080,7 @@ spec:
                                     required:
                                     - type
                                     type: object
+                                  maxItems: 100
                                   type: array
                                 schema:
                                   type: string
@@ -622,6 +1108,12 @@ spec:
                           required:
                           - events
                           type: object
+                          x-kubernetes-validations:
+                          - message: exactly one of the fields in [execute executeProcedure]
+                              must be set
+                            rule: '[has(self.execute),has(self.executeProcedure)].filter(x,x==true).size()
+                              == 1'
+                        maxItems: 100
                         type: array
                     type: object
                   rqlite:
@@ -893,14 +1385,51 @@ spec:
                               items:
                                 type: string
                               type: array
+                            expressions:
+                              description: Expressions are functional-index column
+                                expressions (raw SQL), e.g. ["lower(email)"].
+                              items:
+                                type: string
+                              type: array
                             isUnique:
                               type: boolean
                             name:
                               type: string
+                            sortedColumns:
+                              description: SortedColumns are index columns with explicit
+                                ordering (ASC/DESC, NULLS FIRST/LAST).
+                              items:
+                                properties:
+                                  column:
+                                    type: string
+                                  nulls:
+                                    enum:
+                                    - FIRST
+                                    - LAST
+                                    type: string
+                                  sort:
+                                    enum:
+                                    - ASC
+                                    - DESC
+                                    type: string
+                                required:
+                                - column
+                                type: object
+                              type: array
                             type:
+                              description: 'Type is the index method (access method):
+                                btree (default) | hash | gin | gist | brin | spgist.'
                               type: string
-                          required:
-                          - columns
+                            where:
+                              description: Where is a partial-index predicate (raw
+                                SQL, without the WHERE keyword), e.g. "phone <> ''".
+                              type: string
+                            with:
+                              additionalProperties:
+                                type: string
+                              description: 'With holds index storage parameters, e.g.
+                                {fillfactor: "70"}.'
+                              type: object
                           type: object
                         type: array
                       isDeleted:
@@ -941,6 +1470,7 @@ spec:
                                     required:
                                     - type
                                     type: object
+                                  maxItems: 100
                                   type: array
                                 schema:
                                   type: string
@@ -968,6 +1498,12 @@ spec:
                           required:
                           - events
                           type: object
+                          x-kubernetes-validations:
+                          - message: exactly one of the fields in [execute executeProcedure]
+                              must be set
+                            rule: '[has(self.execute),has(self.executeProcedure)].filter(x,x==true).size()
+                              == 1'
+                        maxItems: 100
                         type: array
                     type: object
                 type: object

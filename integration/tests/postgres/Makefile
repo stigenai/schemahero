@@ -25,9 +25,22 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C trigger-create run
+	make -C trigger-idempotent run
+	make -C row-level-security run
+	make -C row-level-security-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run
@@ -48,6 +61,7 @@ build-postgres-plugin:
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-function run
+	make -C function-replace run
 	make -C create-table run
 	make -C create-table-with-index run
 	make -C drop-table run
@@ -56,9 +70,22 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C trigger-create run
+	make -C trigger-idempotent run
+	make -C row-level-security run
+	make -C row-level-security-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run
@@ -79,6 +106,7 @@ build-postgres-plugin:
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-function run
+	make -C function-replace run
 	make -C create-table run
 	make -C create-table-with-index run
 	make -C drop-table run
@@ -87,9 +115,22 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C trigger-create run
+	make -C trigger-idempotent run
+	make -C row-level-security run
+	make -C row-level-security-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run
@@ -110,6 +151,7 @@ build-postgres-plugin:
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-function run
+	make -C function-replace run
 	make -C create-table run
 	make -C create-table-with-index run
 	make -C drop-table run
@@ -118,9 +160,22 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C trigger-create run
+	make -C trigger-idempotent run
+	make -C row-level-security run
+	make -C row-level-security-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run
@@ -141,6 +196,7 @@ build-postgres-plugin:
 	make -C column-set-default run
 	make -C column-unset-default run
 	make -C create-function run
+	make -C function-replace run
 	make -C create-table run
 	make -C create-table-with-index run
 	make -C drop-table run
@@ -149,9 +205,22 @@ build-postgres-plugin:
 	make -C foreign-key-drop run
 	make -C foreign-key-alter run
 	make -C foreign-key-idempotent run
+	make -C trigger-create run
+	make -C trigger-idempotent run
+	make -C row-level-security run
+	make -C row-level-security-idempotent run
+	make -C check-constraint-add run
+	make -C check-constraint-drop run
+	make -C check-constraint-idempotent run
+	make -C check-constraint-long-name-idempotent run
+	make -C exclusion-constraint-add run
+	make -C exclusion-constraint-drop run
+	make -C exclusion-constraint-idempotent run
 	make -C not-null run
 	make -C not-null-with-default run
 	make -C index-create run
+	make -C index-extended run
+	make -C index-idempotent run
 	make -C primary-key-add run
 	make -C primary-key-drop run
 	make -C primary-key-change run

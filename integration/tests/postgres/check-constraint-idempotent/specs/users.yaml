@@ -1,0 +1,23 @@
+database: schemahero
+name: users
+schema:
+  postgres:
+    primaryKey: [id]
+    columns:
+      - name: id
+        type: integer
+        constraints:
+          notNull: true
+      - name: age
+        type: integer
+        constraints:
+          notNull: true
+      - name: score
+        type: integer
+        constraints:
+          notNull: true
+    checks:
+      - name: users_age_nonneg
+        expression: age >= 0
+      - name: users_score_max
+        expression: score <= 100

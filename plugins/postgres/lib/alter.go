@@ -47,27 +47,27 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 					// add default
 					if column.ColumnDefault != nil {
 						if existingColumn.ColumnDefault == nil || *existingColumn.ColumnDefault != *column.ColumnDefault {
-							localStatement := fmt.Sprintf("alter table %s alter column %s set default '%s'",
-								pgx.Identifier{tableName}.Sanitize(),
+							localStatement := fmt.Sprintf("alter table %s alter column %s set default %s",
+								sanitizeTableName(tableName),
 								pgx.Identifier{existingColumn.Name}.Sanitize(),
-								*column.ColumnDefault)
+								formatColumnDefault(*column.ColumnDefault))
 							statements = append(statements, localStatement)
 						}
 					}
 
 					// update existing values
 					if column.ColumnDefault != nil {
-						localStatement := fmt.Sprintf("update %s set %s='%s' where %s is null",
-							pgx.Identifier{tableName}.Sanitize(),
+						localStatement := fmt.Sprintf("update %s set %s=%s where %s is null",
+							sanitizeTableName(tableName),
 							pgx.Identifier{existingColumn.Name}.Sanitize(),
-							*column.ColumnDefault,
+							formatColumnDefault(*column.ColumnDefault),
 							pgx.Identifier{existingColumn.Name}.Sanitize())
 						statements = append(statements, localStatement)
 					}
 
 					// set not null
 					localStatement := fmt.Sprintf("alter table %s alter column %s set not null",
-						pgx.Identifier{tableName}.Sanitize(),
+						sanitizeTableName(tableName),
 						pgx.Identifier{existingColumn.Name}.Sanitize())
 					statements = append(statements, localStatement)
 
@@ -87,7 +87,7 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 
 				if column.ColumnDefault != nil {
 					if existingColumn.ColumnDefault == nil || *column.ColumnDefault != *existingColumn.ColumnDefault {
-						changes = append(changes, fmt.Sprintf("%s set default '%s'", alterStatement, *column.ColumnDefault))
+						changes = append(changes, fmt.Sprintf("%s set default %s", alterStatement, formatColumnDefault(*column.ColumnDefault)))
 					}
 				} else if existingColumn.ColumnDefault != nil {
 					changes = append(changes, fmt.Sprintf("%s drop default", alterStatement))
@@ -117,11 +117,11 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 				return []string{}, nil
 			}
 
-			return []string{fmt.Sprintf(`alter table %s %s`, pgx.Identifier{tableName}.Sanitize(), strings.Join(changes, ", "))}, nil
+			return []string{fmt.Sprintf(`alter table %s %s`, sanitizeTableName(tableName), strings.Join(changes, ", "))}, nil
 		}
 	}
 
-	return []string{fmt.Sprintf(`alter table %s drop column %s`, pgx.Identifier{tableName}.Sanitize(), pgx.Identifier{existingColumn.Name}.Sanitize())}, nil
+	return []string{fmt.Sprintf(`alter table %s drop column %s`, sanitizeTableName(tableName), pgx.Identifier{existingColumn.Name}.Sanitize())}, nil
 }
 
 func columnsMatch(col1 types.Column, col2 types.Column) bool {

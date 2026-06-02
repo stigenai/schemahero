@@ -49,3 +49,144 @@ func Test_GenerateMysqlIndexName(t *testing.T) {
 		})
 	}
 }
+
+func Test_IndexEquals(t *testing.T) {
+	tests := []struct {
+		name string
+		a    *Index
+		b    *Index
+		want bool
+	}{
+		{
+			name: "identical plain indexes (legacy path)",
+			a:    &Index{Name: "i", Columns: []string{"a", "b"}},
+			b:    &Index{Name: "i", Columns: []string{"a", "b"}},
+			want: true,
+		},
+		{
+			name: "legacy columns are order-insensitive",
+			a:    &Index{Name: "i", Columns: []string{"a", "b"}},
+			b:    &Index{Name: "i", Columns: []string{"b", "a"}},
+			want: true,
+		},
+		{
+			name: "different name",
+			a:    &Index{Name: "i", Columns: []string{"a"}},
+			b:    &Index{Name: "j", Columns: []string{"a"}},
+			want: false,
+		},
+		{
+			name: "empty type equals explicit btree (no churn)",
+			a:    &Index{Name: "i", Columns: []string{"a"}, Type: ""},
+			b:    &Index{Name: "i", Columns: []string{"a"}, Type: "btree"},
+			want: true,
+		},
+		{
+			name: "empty type equals upper-case BTREE",
+			a:    &Index{Name: "i", Columns: []string{"a"}, Type: ""},
+			b:    &Index{Name: "i", Columns: []string{"a"}, Type: "BTREE"},
+			want: true,
+		},
+		{
+			name: "gin differs from btree",
+			a:    &Index{Name: "i", Columns: []string{"a"}, Type: "gin"},
+			b:    &Index{Name: "i", Columns: []string{"a"}, Type: ""},
+			want: false,
+		},
+		{
+			name: "same method gin equal",
+			a:    &Index{Name: "i", Columns: []string{"a"}, Type: "gin"},
+			b:    &Index{Name: "i", Columns: []string{"a"}, Type: "GIN"},
+			want: true,
+		},
+		{
+			name: "where predicate whitespace/case insensitive",
+			a:    &Index{Name: "i", Columns: []string{"a"}, Where: "phone <> ''"},
+			b:    &Index{Name: "i", Columns: []string{"a"}, Where: "PHONE   <>   ''"},
+			want: true,
+		},
+		{
+			name: "different where predicate",
+			a:    &Index{Name: "i", Columns: []string{"a"}, Where: "a is null"},
+			b:    &Index{Name: "i", Columns: []string{"a"}, Where: "a is not null"},
+			want: false,
+		},
+		{
+			// HIGH-2 regression: a partial-index predicate authored in NATURAL form
+			// must equal the CANONICAL text pg_get_expr renders back, or the index
+			// drops+recreates on every plan.
+			name: "natural where predicate equals canonical (pg_get_expr) form",
+			a:    &Index{Name: "i", Columns: []string{"a"}, Where: "phone <> ''"},
+			b:    &Index{Name: "i", Columns: []string{"a"}, Where: "((phone)::text <> ''::text)"},
+			want: true,
+		},
+		{
+			name: "empty where equals empty where",
+			a:    &Index{Name: "i", Columns: []string{"a"}},
+			b:    &Index{Name: "i", Columns: []string{"a"}, Where: ""},
+			want: true,
+		},
+		{
+			name: "sorted columns equal positionally",
+			a:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "a", Sort: "DESC"}, {Column: "b"}}},
+			b:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "a", Sort: "DESC"}, {Column: "b"}}},
+			want: true,
+		},
+		{
+			name: "omitted sort equals explicit ASC",
+			a:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "a"}}},
+			b:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "a", Sort: "ASC"}}},
+			want: true,
+		},
+		{
+			name: "sorted columns order is significant",
+			a:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "a"}, {Column: "b"}}},
+			b:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "b"}, {Column: "a"}}},
+			want: false,
+		},
+		{
+			name: "different sort direction differs",
+			a:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "a", Sort: "DESC"}}},
+			b:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "a", Sort: "ASC"}}},
+			want: false,
+		},
+		{
+			name: "expressions equal after case + whitespace normalization",
+			a:    &Index{Name: "i", Expressions: []string{"coalesce(a, b)"}},
+			b:    &Index{Name: "i", Expressions: []string{"COALESCE(a,   b)"}},
+			want: true,
+		},
+		{
+			name: "different expressions differ",
+			a:    &Index{Name: "i", Expressions: []string{"lower(email)"}},
+			b:    &Index{Name: "i", Expressions: []string{"upper(email)"}},
+			want: false,
+		},
+		{
+			// HIGH-2 regression: a functional-index expression authored in NATURAL
+			// form must equal the CANONICAL text pg_get_indexdef renders back.
+			name: "natural expression equals canonical (pg_get_indexdef) form",
+			a:    &Index{Name: "i", Expressions: []string{"lower(email)"}},
+			b:    &Index{Name: "i", Expressions: []string{"lower((email)::text)"}},
+			want: true,
+		},
+		{
+			name: "one side has sorted columns, other plain columns: not equal",
+			a:    &Index{Name: "i", Columns: []string{"a"}},
+			b:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "a", Sort: "DESC"}}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.a.Equals(tt.b); got != tt.want {
+				t.Errorf("Equals() = %v, want %v", got, tt.want)
+			}
+			// Equals must be symmetric.
+			if got := tt.b.Equals(tt.a); got != tt.want {
+				t.Errorf("Equals() reversed = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

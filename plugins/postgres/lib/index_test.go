@@ -4,9 +4,22 @@ import (
 	"testing"
 
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
+	"github.com/schemahero/schemahero/pkg/database/types"
 
 	"github.com/stretchr/testify/assert"
 )
+
+// Test_RemoveIndexStatement_alwaysIfExists is the MEDIUM-1 regression: a DROP
+// INDEX must ALWAYS carry IF EXISTS, for BOTH unique and non-unique indexes, so a
+// re-run / partial prior apply / concurrent reconcile cannot wedge the plan with a
+// 42704 "index does not exist". Previously only the unique branch was guarded.
+func Test_RemoveIndexStatement_alwaysIfExists(t *testing.T) {
+	unique := RemoveIndexStatement("users", &types.Index{Name: "idx_users_email", IsUnique: true})
+	assert.Equal(t, `drop index if exists "idx_users_email"`, unique)
+
+	nonUnique := RemoveIndexStatement("users", &types.Index{Name: "idx_users_created", IsUnique: false})
+	assert.Equal(t, `drop index if exists "idx_users_created"`, nonUnique)
+}
 
 func Test_AddIndexStatement(t *testing.T) {
 	tests := []struct {
@@ -100,6 +113,83 @@ func Test_AddIndexStatement(t *testing.T) {
 				},
 			},
 			expectedStatement: `create unique index idx_t2_c1 on t2 (c1) with (fillfactor = 90)`,
+		},
+		{
+			name:      "index method hash",
+			tableName: "t2",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Columns: []string{"c1"},
+				Name:    "idx_hash",
+				Type:    "hash",
+			},
+			expectedStatement: `create index idx_hash on t2 using "hash" (c1)`,
+		},
+		{
+			name:      "index method gin",
+			tableName: "t2",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Columns: []string{"data"},
+				Name:    "idx_gin",
+				Type:    "gin",
+			},
+			expectedStatement: `create index idx_gin on t2 using "gin" (data)`,
+		},
+		{
+			name:      "btree type is the default and omits using",
+			tableName: "t2",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Columns: []string{"c1"},
+				Name:    "idx_btree",
+				Type:    "btree",
+			},
+			expectedStatement: `create index idx_btree on t2 (c1)`,
+		},
+		{
+			name:      "partial index with where predicate",
+			tableName: "t2",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Columns:  []string{"email"},
+				Name:     "idx_partial",
+				IsUnique: true,
+				Where:    "phone <> ''",
+			},
+			expectedStatement: `create unique index idx_partial on t2 (email) where phone <> ''`,
+		},
+		{
+			name:      "expression index",
+			tableName: "t2",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Name:        "idx_lower_email",
+				Expressions: []string{"lower(email)"},
+			},
+			// Expression elements are parenthesised per the index grammar, so the
+			// element list "(...)" wraps the already-parenthesised expression.
+			expectedStatement: `create index idx_lower_email on t2 ((lower(email)))`,
+		},
+		{
+			name:      "sorted columns asc/desc and nulls",
+			tableName: "t2",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Name: "idx_sorted",
+				SortedColumns: []*schemasv1alpha4.PostgresqlTableIndexColumn{
+					{Column: "created_at", Sort: "DESC"},
+					{Column: "id"},
+					{Column: "name", Nulls: "LAST"},
+				},
+			},
+			expectedStatement: `create index idx_sorted on t2 (created_at desc, id, name nulls last)`,
+		},
+		{
+			name:      "method, expression, with, and where combined",
+			tableName: "t2",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Name:        "idx_combo",
+				Type:        "gin",
+				Expressions: []string{"to_tsvector('english', body)"},
+				With:        map[string]string{"fastupdate": "off"},
+				Where:       "deleted_at is null",
+			},
+			expectedStatement: `create index idx_combo on t2 using "gin" ((to_tsvector('english', body))) with (fastupdate = off) where deleted_at is null`,
 		},
 	}
 

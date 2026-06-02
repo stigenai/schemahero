@@ -1,0 +1,51 @@
+database: schemahero
+name: users
+requires: []
+schema:
+  postgres:
+    primaryKey: [id]
+    indexes:
+      # Same five extended indexes as the fixtures, declared via the API fields.
+      # The WHERE predicate and the expression body are written in NATURAL
+      # (human-authored) form, NOT PostgreSQL's canonical text. pg_get_expr stores
+      # and renders them back canonically ("phone <> ''" -> "((phone)::text <>
+      # ''::text)", "lower(email)" -> "lower((email)::text)"), so this re-plan
+      # against the existing fixtures proves the comparator canonicalizes both
+      # sides and emits ZERO DDL — the regression for HIGH-2 (natural-form
+      # expression/partial indexes must not drop+recreate on every plan).
+      - name: idx_users_email_partial
+        columns: [email]
+        isUnique: true
+        where: "phone <> ''"
+      - name: idx_users_lower_email
+        expressions: ["lower(email)"]
+      - name: idx_users_phone_hash
+        columns: [phone]
+        type: hash
+      - name: idx_users_data_gin
+        columns: [data]
+        type: gin
+      - name: idx_users_created_id
+        sortedColumns:
+          - column: created_at
+            sort: DESC
+          - column: id
+    columns:
+      - name: id
+        type: integer
+      - name: email
+        type: varchar(255)
+        constraints:
+          notNull: true
+      - name: phone
+        type: varchar(10)
+        constraints:
+          notNull: true
+        default: ""
+      - name: created_at
+        type: timestamptz
+        constraints:
+          notNull: true
+        default: now()
+      - name: data
+        type: jsonb

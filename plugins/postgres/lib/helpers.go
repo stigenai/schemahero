@@ -20,8 +20,156 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v4"
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
+	"github.com/schemahero/schemahero/pkg/database/types"
 )
+
+// splitQualifiedTableName splits a possibly schema-qualified table reference
+// ("schema.table") into its schema and bare-table parts. For a bare name it
+// returns an empty schema and the name unchanged.
+func splitQualifiedTableName(tableName string) (schema string, table string) {
+	if idx := strings.Index(tableName, "."); idx >= 0 {
+		return tableName[:idx], tableName[idx+1:]
+	}
+	return "", tableName
+}
+
+// sanitizeTableName renders a possibly schema-qualified table reference as a
+// safely-quoted SQL identifier: "schema.table" -> "schema"."table", a bare
+// "table" -> "table". This is a drop-in for pgx.Identifier{tableName}.Sanitize(),
+// which quotes a dotted name as a single identifier and so produces the
+// invalid relation "schema.table" in the public schema.
+func sanitizeTableName(tableName string) string {
+	if schema, table := splitQualifiedTableName(tableName); schema != "" {
+		return pgx.Identifier{schema, table}.Sanitize()
+	}
+	return pgx.Identifier{tableName}.Sanitize()
+}
+
+// qualifyTableName splits a schema-qualified reference into safely-quoted parts
+// ("schema.table" -> "schema"."table") but passes a bare name through unquoted.
+// It is the drop-in for sites that previously emitted the table name raw, so a
+// dotted name is no longer mis-parsed while bare-name output is unchanged.
+func qualifyTableName(tableName string) string {
+	if schema, table := splitQualifiedTableName(tableName); schema != "" {
+		return pgx.Identifier{schema, table}.Sanitize()
+	}
+	return tableName
+}
+
+// parseIndexElements extracts ordered columns and functional expressions from a
+// canonical `pg_get_indexdef` string. The pretty per-column array that
+// ListTableIndexes also fetches drops ASC/DESC/NULLS ordering and cannot
+// represent an expression, so the richer fields are recovered here.
+//
+// It returns non-empty results ONLY when the index uses ordering or an
+// expression; a plain index (e.g. "... (email)") yields (nil, nil) so it
+// continues to compare via the bare Columns set and does not spuriously churn.
+func parseIndexElements(indexDef string) ([]types.IndexColumn, []string) {
+	body := extractIndexElementList(indexDef)
+	if body == "" {
+		return nil, nil
+	}
+
+	rawElements := splitTopLevelCommas(body)
+
+	hasRich := false
+	for _, raw := range rawElements {
+		e := strings.TrimSpace(raw)
+		if strings.Contains(e, "(") || strings.ContainsAny(e, " \t") {
+			hasRich = true
+			break
+		}
+	}
+	if !hasRich {
+		return nil, nil
+	}
+
+	var sortedColumns []types.IndexColumn
+	var expressions []string
+	for _, raw := range rawElements {
+		e := strings.TrimSpace(raw)
+		if strings.Contains(e, "(") {
+			// An expression element. pg renders it parenthesised, e.g.
+			// "lower((email)::text)"; trailing ASC/DESC/NULLS are dropped for the
+			// expression-equality compare (best-effort, kept simple for v1).
+			expressions = append(expressions, e)
+			continue
+		}
+		sortedColumns = append(sortedColumns, parseSortedColumnElement(e))
+	}
+
+	return sortedColumns, expressions
+}
+
+// extractIndexElementList returns the substring of a canonical index definition
+// between the outermost parentheses of the column list (the first balanced
+// "(...)" group), ignoring anything after it such as " WHERE ...".
+func extractIndexElementList(indexDef string) string {
+	start := strings.Index(indexDef, "(")
+	if start < 0 {
+		return ""
+	}
+
+	depth := 0
+	for i := start; i < len(indexDef); i++ {
+		switch indexDef[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return indexDef[start+1 : i]
+			}
+		}
+	}
+	return ""
+}
+
+// splitTopLevelCommas splits on commas that are not nested inside parentheses.
+func splitTopLevelCommas(s string) []string {
+	var parts []string
+	depth := 0
+	last := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, s[last:i])
+				last = i + 1
+			}
+		}
+	}
+	parts = append(parts, s[last:])
+	return parts
+}
+
+// parseSortedColumnElement parses a bare column element with optional ordering,
+// e.g. "created_at DESC", "email NULLS FIRST", "name DESC NULLS LAST".
+func parseSortedColumnElement(element string) types.IndexColumn {
+	fields := strings.Fields(element)
+	col := types.IndexColumn{}
+	if len(fields) > 0 {
+		col.Column = fields[0]
+	}
+	upper := strings.ToUpper(element)
+	if strings.Contains(upper, " DESC") {
+		col.Sort = "DESC"
+	} else if strings.Contains(upper, " ASC") {
+		col.Sort = "ASC"
+	}
+	if strings.Contains(upper, "NULLS FIRST") {
+		col.Nulls = "FIRST"
+	} else if strings.Contains(upper, "NULLS LAST") {
+		col.Nulls = "LAST"
+	}
+	return col
+}
 
 // getQualifiedExecuteName creates an execute name that can be used to uniquely identity an executable (function or procedure)
 func getQualifiedExecuteName(functionName, schema string, params []*schemasv1alpha4.PostgresqlExecuteParameter) string {
@@ -30,6 +178,42 @@ func getQualifiedExecuteName(functionName, schema string, params []*schemasv1alp
 		qualifiedFunctionName = fmt.Sprintf("%s.%s", schema, functionName)
 	}
 	return fmt.Sprintf("%s(%s)", qualifiedFunctionName, serializeExecuteParams(params))
+}
+
+// getFunctionSignature builds a Postgres function-identity signature suitable
+// for to_regprocedure(), e.g. "schema.name(text, integer)".
+//
+// A function's identity is (schema, name, input-argument types) ONLY: OUT
+// params are NOT part of the signature, and neither names nor modes are. This
+// is deliberately distinct from serializeExecuteParams (which emits mode+name+type
+// for CREATE and is reused by trigger.go) — passing the full serialization here
+// would build an invalid signature and silently miss the function, causing a
+// second CREATE instead of a REPLACE.
+//
+// The name is left unquoted so to_regprocedure parses it search_path-aware (an
+// unqualified name resolves via search_path; a qualified "schema.name" is exact).
+// The corpus uses lowercase identifiers, for which this is correct.
+func getFunctionSignature(functionName, schema string, params []*schemasv1alpha4.PostgresqlExecuteParameter) string {
+	qualifiedFunctionName := functionName
+	if schema != "" && schema != "public" {
+		qualifiedFunctionName = fmt.Sprintf("%s.%s", schema, functionName)
+	}
+	return fmt.Sprintf("%s(%s)", qualifiedFunctionName, signatureArgTypes(params))
+}
+
+// signatureArgTypes serializes ONLY the input-argument types (IN, INOUT,
+// VARIADIC) of a function, comma-separated and without names or modes, e.g.
+// "text, integer". OUT params are excluded because they are not part of the
+// function's identity.
+func signatureArgTypes(params []*schemasv1alpha4.PostgresqlExecuteParameter) string {
+	ts := []string{}
+	for _, param := range params {
+		if strings.EqualFold(param.Mode, "OUT") {
+			continue
+		}
+		ts = append(ts, param.Type)
+	}
+	return strings.Join(ts, ", ")
 }
 
 // serializeExecuteParams serializes parameters so that they can be used when sending instructions to Postgres

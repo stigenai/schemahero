@@ -125,6 +125,94 @@ func Test_triggerCreateStatement(t *testing.T) {
 	}
 }
 
+func Test_dropTriggerStatement(t *testing.T) {
+	tests := []struct {
+		name              string
+		triggerName       string
+		tableName         string
+		expectedStatement string
+	}{
+		{
+			name:              "bare table",
+			triggerName:       "tt",
+			tableName:         "users",
+			expectedStatement: `drop trigger if exists "tt" on "users"`,
+		},
+		{
+			name:              "schema-qualified table",
+			triggerName:       "tt",
+			tableName:         "app.users",
+			expectedStatement: `drop trigger if exists "tt" on "app"."users"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := dropTriggerStatement(test.triggerName, test.tableName)
+			assert.Equal(t, test.expectedStatement, actual)
+		})
+	}
+}
+
+func Test_normalizeTriggerDefinition(t *testing.T) {
+	tests := []struct {
+		name string
+		a    string
+		b    string
+	}{
+		{
+			// EXECUTE PROCEDURE (what triggerCreateStatement may emit) and
+			// EXECUTE FUNCTION (what pg_get_triggerdef emits on PG12+) are synonyms
+			// and must normalize equal.
+			name: "execute procedure equals execute function",
+			a:    `create trigger "tt" after insert on "users" for each row execute procedure fn()`,
+			b:    `CREATE TRIGGER tt AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION fn()`,
+		},
+		{
+			name: "case and whitespace collapse, trailing semicolon",
+			a:    `create trigger "tt" after insert on "users" for each row execute function fn()`,
+			b: `create   trigger "tt"
+				after insert on "users"   for each row execute function fn();`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, normalizeTriggerDefinition(test.a), normalizeTriggerDefinition(test.b))
+		})
+	}
+}
+
+func Test_normalizeTriggerDefinition_distinguishesDifferent(t *testing.T) {
+	// A genuine difference (different event) must NOT normalize equal, otherwise
+	// the diff would miss a real change.
+	a := `create trigger "tt" after insert on "users" for each row execute function fn()`
+	b := `create trigger "tt" after update on "users" for each row execute function fn()`
+	assert.NotEqual(t, normalizeTriggerDefinition(a), normalizeTriggerDefinition(b))
+}
+
+func Test_normalizeTriggerDefinition_stripsRedundantPublicSchema(t *testing.T) {
+	// MEDIUM-2 regression: triggerCreateStatement omits the schema for the default
+	// "public" schema (bare "users" / "fn()"), but pg_get_triggerdef FULLY
+	// schema-qualifies both the table and the function ("public.users" /
+	// "public.fn()"). These must normalize EQUAL, or an idempotent trigger on a
+	// public-schema function would churn (a guarded but pointless drop+recreate) on
+	// every plan.
+	desired := `create trigger "tt" after insert on "users" for each row execute function fn()`
+	introspected := `CREATE TRIGGER tt AFTER INSERT ON public.users FOR EACH ROW EXECUTE FUNCTION public.fn()`
+	assert.Equal(t, normalizeTriggerDefinition(desired), normalizeTriggerDefinition(introspected))
+}
+
+func Test_normalizeTriggerDefinition_keepsNonPublicSchema(t *testing.T) {
+	// A function in a NON-default schema must still be distinguished: stripping
+	// only "public." must not collapse "audit.fn()" to "fn()", so a trigger whose
+	// spec forgot the schema is correctly seen as different (not silently treated
+	// as equal).
+	bare := `create trigger "tt" after insert on "users" for each row execute function fn()`
+	auditQualified := `create trigger "tt" after insert on "users" for each row execute function audit.fn()`
+	assert.NotEqual(t, normalizeTriggerDefinition(bare), normalizeTriggerDefinition(auditQualified))
+}
+
 func Test_triggerEventSyntax(t *testing.T) {
 	tests := []struct {
 		name              string

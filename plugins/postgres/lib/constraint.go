@@ -12,7 +12,7 @@ func RemoveConstrantStatement(tableName string, constraint *types.KeyConstraint)
 	if constraint == nil {
 		return ""
 	}
-	return fmt.Sprintf("alter table %s drop constraint %s", tableName, pgx.Identifier{constraint.Name}.Sanitize())
+	return fmt.Sprintf("alter table %s drop constraint %s", qualifyTableName(tableName), pgx.Identifier{constraint.Name}.Sanitize())
 }
 
 func AddConstrantStatement(tableName string, constraint *types.KeyConstraint) string {
@@ -22,7 +22,7 @@ func AddConstrantStatement(tableName string, constraint *types.KeyConstraint) st
 	// `ALTER TABLE table_name ADD CONSTRAINT constraint_name PRIMARY KEY (index_col1, index_col2, ... index_col_n);
 	return fmt.Sprintf(
 		"alter table %s add constraint %s%s %s",
-		tableName,
+		qualifyTableName(tableName),
 		constraint.GenerateName(tableName),
 		primaryKeyClause(constraint),
 		constraintColumnClause(constraint),
