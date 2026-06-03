@@ -9,14 +9,28 @@ func Test_stripOIDClass(t *testing.T) {
 		want  string
 	}{
 		{
+			// The cast is stripped but the string-literal quotes are KEPT, so the
+			// result stays a valid SQL literal that compares equal to the spec form.
 			name:  "basic",
 			value: `'11'::integer`,
-			want:  "11",
+			want:  "'11'",
 		},
 		{
 			name:  "empty",
 			value: `''::character varying`,
-			want:  "",
+			want:  "''",
+		},
+		{
+			// The churn case: an enum default round-trips to its quoted literal,
+			// matching the spec's 'pending' instead of dropping to bare pending.
+			name:  "enum cast keeps quotes",
+			value: `'pending'::lifecycle_state`,
+			want:  "'pending'",
+		},
+		{
+			name:  "jsonb cast keeps quotes",
+			value: `'[]'::jsonb`,
+			want:  "'[]'",
 		},
 		{
 			name:  "identity",
