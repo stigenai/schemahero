@@ -6,7 +6,16 @@ import (
 	"strings"
 )
 
-var oidClassRegexp = regexp.MustCompile(`'(.*)'::.+`)
+// oidClassRegexp matches a single-quoted string literal followed by a "::type"
+// cast (the form PostgreSQL stores/renders column defaults in, e.g.
+// 'pending'::lifecycle_state). The capture group KEEPS the surrounding quotes so
+// the stripped result is still a valid SQL string literal ('pending'), not a bare
+// word (pending). This is load-bearing for the column-default diff: the desired
+// default comes from the spec WITH quotes ('pending'), so dropping the quotes here
+// made the introspected default ('pending') compare unequal to the spec and
+// re-emit ALTER COLUMN SET DEFAULT on every plan. formatColumnDefault re-quotes a
+// bare value anyway, so keeping the quotes leaves rendering unchanged.
+var oidClassRegexp = regexp.MustCompile(`('.*')::.+`)
 
 func stripOIDClass(value string) string {
 	matches := oidClassRegexp.FindStringSubmatch(value)
