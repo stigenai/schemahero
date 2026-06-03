@@ -176,6 +176,111 @@ func Test_IndexEquals(t *testing.T) {
 			b:    &Index{Name: "i", SortedColumns: []IndexColumn{{Column: "a", Sort: "DESC"}}},
 			want: false,
 		},
+		// === Feature A: operator class (opClass) equality ===
+		{
+			// TRACE: spec WITH opclass must equal introspected WITH same opclass
+			// (steady-state no-op for a GIN index with jsonb_path_ops).
+			name: "opclass jsonb_path_ops on both sides: equal (no churn)",
+			a: &Index{
+				Name: "idx_blocks_conditions_gin",
+				Type: "gin",
+				SortedColumns: []IndexColumn{
+					{Column: "conditions", OpClass: "jsonb_path_ops"},
+				},
+			},
+			b: &Index{
+				Name: "idx_blocks_conditions_gin",
+				Type: "gin",
+				SortedColumns: []IndexColumn{
+					{Column: "conditions", OpClass: "jsonb_path_ops"},
+				},
+			},
+			want: true,
+		},
+		{
+			// TRACE: spec WITHOUT opclass vs introspected WITH opclass must be
+			// unequal — they are genuinely different indexes and must trigger a
+			// drop+recreate rather than silently ignoring the opclass mismatch.
+			name: "spec without opclass vs introspected with opclass: not equal",
+			a: &Index{
+				Name: "idx_blocks_conditions_gin",
+				Type: "gin",
+				SortedColumns: []IndexColumn{
+					{Column: "conditions"},
+				},
+			},
+			b: &Index{
+				Name: "idx_blocks_conditions_gin",
+				Type: "gin",
+				SortedColumns: []IndexColumn{
+					{Column: "conditions", OpClass: "jsonb_path_ops"},
+				},
+			},
+			want: false,
+		},
+		{
+			// opclass comparison is case-insensitive (pg renders it lowercase;
+			// a spec author may use mixed case).
+			name: "opclass comparison is case-insensitive",
+			a: &Index{
+				Name: "i",
+				SortedColumns: []IndexColumn{
+					{Column: "name", OpClass: "TEXT_PATTERN_OPS"},
+				},
+			},
+			b: &Index{
+				Name: "i",
+				SortedColumns: []IndexColumn{
+					{Column: "name", OpClass: "text_pattern_ops"},
+				},
+			},
+			want: true,
+		},
+		// === Feature B: mixed column + expression ordered list equality ===
+		{
+			// TRACE: the blocks_cloud_id_unique index as introspected (all elements
+			// as Expressions, in positional order) must equal the spec authored with
+			// natural COALESCE form and no ::character varying cast, with the
+			// partial-index WHERE predicate canonicalizing equal.
+			name: "mixed ordered expression list equals spec with natural COALESCE form",
+			a: &Index{
+				Name:     "blocks_cloud_id_unique",
+				IsUnique: true,
+				Expressions: []string{
+					"provider",
+					"resource_type",
+					"COALESCE(account_id, ''::character varying)",
+					"cloud_id",
+				},
+				Where: "(cloud_id IS NOT NULL) AND (state <> ALL (ARRAY['deleted'::lifecycle_state, 'soft_deleted'::lifecycle_state]))",
+			},
+			b: &Index{
+				Name:     "blocks_cloud_id_unique",
+				IsUnique: true,
+				Expressions: []string{
+					"provider",
+					"resource_type",
+					"COALESCE(account_id, '')",
+					"cloud_id",
+				},
+				Where: "(cloud_id IS NOT NULL) AND (state <> ALL (ARRAY['deleted'::lifecycle_state, 'soft_deleted'::lifecycle_state]))",
+			},
+			want: true,
+		},
+		{
+			// Positional order in the mixed expression list is significant — a
+			// reordering of columns must not compare equal.
+			name: "mixed expression list with different order: not equal",
+			a: &Index{
+				Name:        "i",
+				Expressions: []string{"provider", "resource_type", "COALESCE(account_id, '')", "cloud_id"},
+			},
+			b: &Index{
+				Name:        "i",
+				Expressions: []string{"resource_type", "provider", "COALESCE(account_id, '')", "cloud_id"},
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {

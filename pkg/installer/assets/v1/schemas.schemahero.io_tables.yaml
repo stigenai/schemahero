@@ -323,6 +323,14 @@ spec:
                                     - FIRST
                                     - LAST
                                     type: string
+                                  opClass:
+                                    description: |-
+                                      OpClass is the operator class name emitted after the column and before
+                                      sort/nulls modifiers, e.g. "jsonb_path_ops" or "text_pattern_ops".
+                                      It is compared case-insensitively; an empty value means the type's default
+                                      opclass and is omitted from the rendered DDL — matching pg_get_indexdef
+                                      behaviour, which only renders a non-default opclass.
+                                    type: string
                                   sort:
                                     enum:
                                     - ASC
@@ -856,6 +864,14 @@ spec:
                                     enum:
                                     - FIRST
                                     - LAST
+                                    type: string
+                                  opClass:
+                                    description: |-
+                                      OpClass is the operator class name emitted after the column and before
+                                      sort/nulls modifiers, e.g. "jsonb_path_ops" or "text_pattern_ops".
+                                      It is compared case-insensitively; an empty value means the type's default
+                                      opclass and is omitted from the rendered DDL — matching pg_get_indexdef
+                                      behaviour, which only renders a non-default opclass.
                                     type: string
                                   sort:
                                     enum:
@@ -1406,6 +1422,14 @@ spec:
                                     enum:
                                     - FIRST
                                     - LAST
+                                    type: string
+                                  opClass:
+                                    description: |-
+                                      OpClass is the operator class name emitted after the column and before
+                                      sort/nulls modifiers, e.g. "jsonb_path_ops" or "text_pattern_ops".
+                                      It is compared case-insensitively; an empty value means the type's default
+                                      opclass and is omitted from the rendered DDL — matching pg_get_indexdef
+                                      behaviour, which only renders a non-default opclass.
                                     type: string
                                   sort:
                                     enum:

@@ -126,6 +126,12 @@ type PostgresqlTableIndex struct {
 
 type PostgresqlTableIndexColumn struct {
 	Column string `json:"column" yaml:"column"`
+	// OpClass is the operator class name emitted after the column and before
+	// sort/nulls modifiers, e.g. "jsonb_path_ops" or "text_pattern_ops".
+	// It is compared case-insensitively; an empty value means the type's default
+	// opclass and is omitted from the rendered DDL — matching pg_get_indexdef
+	// behaviour, which only renders a non-default opclass.
+	OpClass string `json:"opClass,omitempty" yaml:"opClass,omitempty"`
 	//+kubebuilder:validation:Enum=ASC;DESC
 	Sort string `json:"sort,omitempty" yaml:"sort,omitempty"`
 	//+kubebuilder:validation:Enum=FIRST;LAST

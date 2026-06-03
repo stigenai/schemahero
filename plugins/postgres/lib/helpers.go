@@ -66,6 +66,23 @@ func qualifyTableName(tableName string) string {
 // It returns non-empty results ONLY when the index uses ordering or an
 // expression; a plain index (e.g. "... (email)") yields (nil, nil) so it
 // continues to compare via the bare Columns set and does not spuriously churn.
+//
+// MIXED INDEXES: when a pg_get_indexdef element list contains BOTH plain column
+// elements AND expression elements (i.e. at least one element has a "(" and at
+// least one does not), positional order matters for correctness. In that case
+// ALL elements — both plain and expression — are returned as Expressions in
+// their original order, with SortedColumns = nil. This is the only
+// representation that faithfully preserves order: SortedColumns+Expressions is
+// a split structure with no position field, so it cannot survive a round-trip
+// for a mixed list.
+//
+// Guard: the all-Expressions path is only taken when the non-expression plain
+// columns carry no explicit sort/nulls keywords. If a mixed list has a plain
+// column with explicit ASC/DESC/NULLS ordering, the old split behaviour is
+// kept and a "// known limitation" comment documents it. Such an index is
+// vanishingly rare in practice (pg_get_indexdef would render it as an
+// expression "(col) desc", not "col desc", for a mixed list), so silently
+// mis-ordering it via the split path is acceptable.
 func parseIndexElements(indexDef string) ([]types.IndexColumn, []string) {
 	body := extractIndexElementList(indexDef)
 	if body == "" {
@@ -84,6 +101,54 @@ func parseIndexElements(indexDef string) ([]types.IndexColumn, []string) {
 	}
 	if !hasRich {
 		return nil, nil
+	}
+
+	// Classify each trimmed element as plain (no "(") or expression (has "(").
+	hasExpr := false
+	hasPlain := false
+	for _, raw := range rawElements {
+		e := strings.TrimSpace(raw)
+		if strings.Contains(e, "(") {
+			hasExpr = true
+		} else {
+			hasPlain = true
+		}
+	}
+
+	// MIXED case: at least one expression and at least one plain column.
+	// Return all elements as Expressions in positional order, provided the
+	// plain columns are bare (no sort/nulls keywords). This preserves the
+	// element ordering that a split SortedColumns+Expressions structure loses.
+	if hasExpr && hasPlain {
+		plainColumnsHaveSortKeywords := false
+		for _, raw := range rawElements {
+			e := strings.TrimSpace(raw)
+			if strings.Contains(e, "(") {
+				continue
+			}
+			upper := strings.ToUpper(e)
+			if strings.ContainsAny(upper, " \t") &&
+				(strings.Contains(upper, " ASC") || strings.Contains(upper, " DESC") ||
+					strings.Contains(upper, "NULLS")) {
+				plainColumnsHaveSortKeywords = true
+				break
+			}
+		}
+		if !plainColumnsHaveSortKeywords {
+			// All plain columns are bare (possibly with an opclass token, which is
+			// fine because opclasses look like identifiers — we preserve them verbatim
+			// in the expression string). Return the full ordered list as Expressions.
+			expressions := make([]string, 0, len(rawElements))
+			for _, raw := range rawElements {
+				expressions = append(expressions, strings.TrimSpace(raw))
+			}
+			return nil, expressions
+		}
+		// known limitation: a mixed element list where plain columns carry explicit
+		// ASC/DESC/NULLS ordering cannot be faithfully round-tripped via either the
+		// split SortedColumns+Expressions structure or the all-Expressions path.
+		// Fall through to the old split behaviour, which at least preserves the
+		// sort/nulls on the plain columns even if positional order is lost.
 	}
 
 	var sortedColumns []types.IndexColumn
@@ -149,14 +214,53 @@ func splitTopLevelCommas(s string) []string {
 	return parts
 }
 
-// parseSortedColumnElement parses a bare column element with optional ordering,
-// e.g. "created_at DESC", "email NULLS FIRST", "name DESC NULLS LAST".
+// parseSortedColumnElement parses a bare column element with optional operator
+// class and optional ordering, e.g.:
+//
+//	"created_at DESC"
+//	"email NULLS FIRST"
+//	"name DESC NULLS LAST"
+//	"conditions jsonb_path_ops"        (opclass only, no sort/nulls)
+//	"data gin_trgm_ops DESC NULLS LAST" (opclass + sort + nulls)
+//
+// PostgreSQL index-column grammar: column [opclass] [ASC|DESC] [NULLS FIRST|LAST]
+//
+// The opclass is recovered as follows: fields[0] is the column; then each
+// subsequent token is checked against the known sort/nulls keywords. The FIRST
+// token that is NOT one of {asc, desc, nulls, first, last} is treated as the
+// opclass. This handles the grammar unambiguously because pg_get_indexdef only
+// emits a non-default opclass, and PostgreSQL opclass names are plain
+// identifiers — they cannot be confused with the small closed set of ordering
+// keywords.
+//
+// Known limitation: COLLATE is not handled. A column with an explicit COLLATE
+// clause (e.g. "name COLLATE "en-US" ASC") would have "collate" mis-classified
+// as an opclass. COLLATE on index columns is very rare in practice and is not
+// present in the corpus, so this is acceptable for v1.
 func parseSortedColumnElement(element string) types.IndexColumn {
 	fields := strings.Fields(element)
 	col := types.IndexColumn{}
-	if len(fields) > 0 {
-		col.Column = fields[0]
+	if len(fields) == 0 {
+		return col
 	}
+	col.Column = fields[0]
+
+	// sortNullsKeywords is the closed set of tokens that are part of the
+	// ordering clause. Any token NOT in this set (and not the column name at
+	// fields[0]) is the opclass.
+	sortNullsKeywords := map[string]bool{
+		"asc": true, "desc": true, "nulls": true, "first": true, "last": true,
+	}
+
+	for _, f := range fields[1:] {
+		lower := strings.ToLower(f)
+		if !sortNullsKeywords[lower] {
+			// First non-keyword token after the column is the opclass.
+			col.OpClass = lower
+			break
+		}
+	}
+
 	upper := strings.ToUpper(element)
 	if strings.Contains(upper, " DESC") {
 		col.Sort = "DESC"

@@ -84,6 +84,16 @@ func buildIndexElements(schemaIndex *schemasv1alpha4.PostgresqlTableIndex) []str
 
 	for _, sc := range schemaIndex.SortedColumns {
 		element := sc.Column
+		// The operator class is an identifier emitted AFTER the column and BEFORE
+		// sort/nulls, matching the PostgreSQL index-column grammar:
+		//   column [opclass] [ASC|DESC] [NULLS FIRST|LAST]
+		// It is rendered as a bare lowercase token — pg_get_indexdef outputs
+		// opclasses unquoted (e.g. "conditions jsonb_path_ops"), so matching that
+		// form avoids a drop+recreate churn from a quoting mismatch. Empty means
+		// the type's default opclass (omit entirely, same as pg_get_indexdef).
+		if op := strings.ToLower(strings.TrimSpace(sc.OpClass)); op != "" {
+			element += " " + op
+		}
 		if dir := strings.ToUpper(strings.TrimSpace(sc.Sort)); dir == "DESC" {
 			element += " desc"
 		} else if dir == "ASC" {

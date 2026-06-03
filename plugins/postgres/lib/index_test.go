@@ -191,6 +191,51 @@ func Test_AddIndexStatement(t *testing.T) {
 			},
 			expectedStatement: `create index idx_combo on t2 using "gin" ((to_tsvector('english', body))) with (fastupdate = off) where deleted_at is null`,
 		},
+		// === Feature A: operator class in SortedColumn ===
+		{
+			// TRACE: a GIN index with jsonb_path_ops must render the opclass as a
+			// bare lowercase token after the column and before any sort/nulls —
+			// matching pg_get_indexdef output so that plan equality holds on
+			// round-trip.
+			name:      "gin index with jsonb_path_ops opclass",
+			tableName: "blocks",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Name: "idx_blocks_conditions_gin",
+				Type: "gin",
+				SortedColumns: []*schemasv1alpha4.PostgresqlTableIndexColumn{
+					{Column: "conditions", OpClass: "jsonb_path_ops"},
+				},
+			},
+			expectedStatement: `create index idx_blocks_conditions_gin on blocks using "gin" (conditions jsonb_path_ops)`,
+		},
+		{
+			// opclass with sort direction: opclass must appear between the column
+			// and the DESC/NULLS tokens (grammar: col opclass desc nulls last).
+			name:      "opclass with sort direction",
+			tableName: "t2",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Name: "idx_data",
+				Type: "gin",
+				SortedColumns: []*schemasv1alpha4.PostgresqlTableIndexColumn{
+					{Column: "data", OpClass: "gin_trgm_ops", Sort: "DESC", Nulls: "LAST"},
+				},
+			},
+			expectedStatement: `create index idx_data on t2 using "gin" (data gin_trgm_ops desc nulls last)`,
+		},
+		{
+			// No opclass: SortedColumn without OpClass must render unchanged from
+			// the pre-feature behaviour (opclass omitted entirely).
+			name:      "sorted column without opclass is unchanged",
+			tableName: "t2",
+			schemaIndex: &schemasv1alpha4.PostgresqlTableIndex{
+				Name: "idx_sorted_no_opclass",
+				SortedColumns: []*schemasv1alpha4.PostgresqlTableIndexColumn{
+					{Column: "created_at", Sort: "DESC"},
+					{Column: "id"},
+				},
+			},
+			expectedStatement: `create index idx_sorted_no_opclass on t2 (created_at desc, id)`,
+		},
 	}
 
 	for _, test := range tests {
