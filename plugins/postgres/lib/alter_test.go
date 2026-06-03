@@ -44,6 +44,8 @@ func Test_AlterColumnStatments(t *testing.T) {
 	defaultEmpty := ""
 	defaultQuotedEnum := "'pending'" // Table-spec embedded-quote convention
 	defaultFunc := "gen_random_uuid()"
+	defaultEnumCast := "'pending'::lifecycle_state"  // how pg stores/renders the above
+	defaultActiveCast := "'active'::lifecycle_state" // a genuinely different stored default
 
 	tests := []struct {
 		name               string
@@ -357,6 +359,47 @@ func Test_AlterColumnStatments(t *testing.T) {
 			},
 			expectedStatements: []string{`alter table "t" alter column "id" set default gen_random_uuid()`},
 		},
+		{
+			// Regression (column-default churn): a spec default in natural form
+			// ('pending') must compare EQUAL to the cast form PostgreSQL stores and
+			// re-renders ('pending'::lifecycle_state), so a steady-state plan emits
+			// NOTHING. Without the cast-stripping compare the approver re-applies
+			// SET DEFAULT every reconcile — a needless ACCESS EXCLUSIVE catalog
+			// churn on a possibly-hot table.
+			name:      "enum default natural form vs stored ::type cast is a no-op",
+			tableName: "t",
+			desiredColumns: []*schemasv1alpha4.PostgresqlTableColumn{
+				{
+					Name:    "state",
+					Type:    "lifecycle_state",
+					Default: &defaultQuotedEnum,
+				},
+			},
+			existingColumn: &types.Column{
+				Name:          "state",
+				DataType:      "lifecycle_state",
+				ColumnDefault: &defaultEnumCast,
+			},
+			expectedStatements: []string{},
+		},
+		{
+			// A genuinely different default (not just a cast) still re-sets.
+			name:      "different default still emits set default",
+			tableName: "t",
+			desiredColumns: []*schemasv1alpha4.PostgresqlTableColumn{
+				{
+					Name:    "state",
+					Type:    "lifecycle_state",
+					Default: &defaultQuotedEnum, // 'pending'
+				},
+			},
+			existingColumn: &types.Column{
+				Name:          "state",
+				DataType:      "lifecycle_state",
+				ColumnDefault: &defaultActiveCast, // 'active'::lifecycle_state
+			},
+			expectedStatements: []string{`alter table "t" alter column "state" set default 'pending'`},
+		},
 	}
 
 	for _, test := range tests {
@@ -366,6 +409,30 @@ func Test_AlterColumnStatments(t *testing.T) {
 			generatedStatements, err := AlterColumnStatements(test.tableName, []string{}, test.desiredColumns, test.existingColumn)
 			req.NoError(err)
 			assert.Equal(t, test.expectedStatements, generatedStatements)
+		})
+	}
+}
+
+func Test_columnDefaultsEqual(t *testing.T) {
+	p := func(s string) *string { return &s }
+	tests := []struct {
+		name   string
+		a      *string
+		b      *string
+		expect bool
+	}{
+		{"both nil", nil, nil, true},
+		{"nil vs value", nil, p("'pending'"), false},
+		{"value vs nil", p("'pending'"), nil, false},
+		{"natural vs stored enum ::type cast", p("'pending'"), p("'pending'::lifecycle_state"), true},
+		{"jsonb natural vs ::jsonb cast", p("'[]'"), p("'[]'::jsonb"), true},
+		{"function default paren noise", p("now()"), p("now()"), true},
+		{"numeric quote-cast artifact", p("0"), p("'0'::integer"), true},
+		{"genuinely different values not equal", p("'pending'"), p("'active'::lifecycle_state"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expect, columnDefaultsEqual(tt.a, tt.b))
 		})
 	}
 }
