@@ -46,7 +46,7 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 
 					// add default
 					if column.ColumnDefault != nil {
-						if existingColumn.ColumnDefault == nil || *existingColumn.ColumnDefault != *column.ColumnDefault {
+						if !columnDefaultsEqual(existingColumn.ColumnDefault, column.ColumnDefault) {
 							localStatement := fmt.Sprintf("alter table %s alter column %s set default %s",
 								sanitizeTableName(tableName),
 								pgx.Identifier{existingColumn.Name}.Sanitize(),
@@ -86,7 +86,7 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 				}
 
 				if column.ColumnDefault != nil {
-					if existingColumn.ColumnDefault == nil || *column.ColumnDefault != *existingColumn.ColumnDefault {
+					if !columnDefaultsEqual(existingColumn.ColumnDefault, column.ColumnDefault) {
 						changes = append(changes, fmt.Sprintf("%s set default %s", alterStatement, formatColumnDefault(*column.ColumnDefault)))
 					}
 				} else if existingColumn.ColumnDefault != nil {
@@ -124,6 +124,29 @@ func AlterColumnStatements(tableName string, primaryKeys []string, desiredColumn
 	return []string{fmt.Sprintf(`alter table %s drop column %s`, sanitizeTableName(tableName), pgx.Identifier{existingColumn.Name}.Sanitize())}, nil
 }
 
+// columnDefaultsEqual reports whether two column DEFAULT expressions are
+// semantically equal, ignoring the "::type" casts and redundant parens that
+// PostgreSQL adds when it stores and re-renders a default. A spec author writes a
+// default in natural form (e.g. "'pending'"), but pg_get_expr renders the STORED
+// default with its type cast ("'pending'::lifecycle_state"); a raw string compare
+// therefore differs on EVERY plan and re-emits "ALTER COLUMN ... SET DEFAULT"
+// forever — a needless ACCESS EXCLUSIVE catalog churn each reconcile, on a
+// possibly-hot table. Both sides are reduced via the shared CanonicalizeSQLExpr —
+// the SAME normalization the CHECK / index / EXCLUDE comparators use — so the
+// natural and canonical forms compare equal and a steady-state plan is a true
+// no-op. A nil pointer means "no default": two nils are equal; nil vs non-nil is
+// not. Like the other canonical comparators it errs toward equal, which for a
+// default means at worst a missed cosmetic re-set, never a destructive change.
+func columnDefaultsEqual(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return types.CanonicalizeSQLExpr(*a) == types.CanonicalizeSQLExpr(*b)
+}
+
 func columnsMatch(col1 types.Column, col2 types.Column) bool {
 	// for time and timestamp comparisons, we know that postgres
 	// defaults to without time zone, so let's normalize a case
@@ -150,11 +173,7 @@ func columnsMatch(col1 types.Column, col2 types.Column) bool {
 		return false
 	}
 
-	if col1.ColumnDefault != nil && col2.ColumnDefault == nil {
-		return false
-	} else if col1.ColumnDefault == nil && col2.ColumnDefault != nil {
-		return false
-	} else if col1.ColumnDefault != nil && col2.ColumnDefault != nil && *col1.ColumnDefault != *col2.ColumnDefault {
+	if !columnDefaultsEqual(col1.ColumnDefault, col2.ColumnDefault) {
 		return false
 	}
 
