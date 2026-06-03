@@ -254,5 +254,24 @@ func skipTypeToken(s string, i int) int {
 		}
 	}
 
+	// Optional trailing array marker(s). PostgreSQL renders an array type as
+	// "type[]" (e.g. "::text[]", "::integer[]") and a multi-dimensional array as
+	// "type[][]". Without consuming it, the "::type" branch strips "text" but leaves
+	// the "[]" — and the main loop keeps it (brackets are not parens it drops) — so a
+	// varchar-column CHECK such as "(outcome)::text = ANY ((ARRAY[...])::text[])"
+	// canonicalizes with a trailing "[]" and never equals the natural "outcome =
+	// ANY (ARRAY[...])", forcing a drop+recreate on every plan. The "[" must
+	// immediately follow the type token (pg emits no space), so this cannot swallow a
+	// parenthesized cast's array subscript "(x::type)[i]" (that "[" follows a ")").
+	for i < len(s) && s[i] == '[' {
+		i++
+		for i < len(s) && s[i] != ']' {
+			i++
+		}
+		if i < len(s) && s[i] == ']' {
+			i++
+		}
+	}
+
 	return i
 }

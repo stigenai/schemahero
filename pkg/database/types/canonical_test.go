@@ -93,6 +93,20 @@ func Test_CanonicalizeSQLExpr_naturalEqualsCanonical(t *testing.T) {
 			natural:   "tenant_id = current_setting('app.tenant',true)::uuid",
 			canonical: "(tenant_id = (current_setting('app.tenant', true))::uuid)",
 		},
+		{
+			// A CHECK on a VARCHAR column: PostgreSQL casts the column to text AND
+			// wraps the whole ARRAY in a "::text[]" array cast (each element becomes
+			// "::character varying"). The outer "::text[]" must be stripped INCLUDING
+			// its "[]" array marker — otherwise the canonical form keeps a dangling
+			// "[]" and never equals the natural "outcome = ANY (ARRAY[...])", forcing
+			// work_item_history's outcome_check to drop+recreate every plan. Found via
+			// plan-capture (migration 6b79a43), 2026-06-02.
+			name:    "varchar-column = ANY(ARRAY[...]) with outer ::text[] array cast",
+			natural: "outcome = ANY (ARRAY['success','failure','partial','reassigned'])",
+			canonical: "((outcome)::text = ANY ((ARRAY['success'::character varying, " +
+				"'failure'::character varying, 'partial'::character varying, " +
+				"'reassigned'::character varying])::text[]))",
+		},
 	}
 
 	for _, test := range tests {
