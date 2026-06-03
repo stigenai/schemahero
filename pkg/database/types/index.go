@@ -7,12 +7,17 @@ import (
 	schemasv1alpha4 "github.com/schemahero/schemahero/pkg/apis/schemas/v1alpha4"
 )
 
-// IndexColumn is a single index column with optional ordering. It is the
-// dialect-neutral mirror of the apis PostgresqlTableIndexColumn.
+// IndexColumn is a single index column with optional operator class and
+// ordering. It is the dialect-neutral mirror of the apis
+// PostgresqlTableIndexColumn.
 type IndexColumn struct {
 	Column string
-	Sort   string // ASC (default) | DESC
-	Nulls  string // FIRST | LAST
+	// OpClass is the operator class name, e.g. "jsonb_path_ops". Empty means
+	// the type's default opclass and is omitted from DDL. Compared
+	// case-insensitively; see sortedColumnsEqual.
+	OpClass string
+	Sort    string // ASC (default) | DESC
+	Nulls   string // FIRST | LAST
 }
 
 type Index struct {
@@ -126,6 +131,14 @@ func sortedColumnsEqual(a, b []IndexColumn) bool {
 		if strings.ToUpper(strings.TrimSpace(a[i].Nulls)) != strings.ToUpper(strings.TrimSpace(b[i].Nulls)) {
 			return false
 		}
+		// Operator class comparison is case-insensitive. An empty/omitted opclass
+		// on both sides is equal (both use the type's default). An explicit opclass
+		// on one side and none on the other is a real difference: the stored index
+		// was created with a specific opclass (e.g. jsonb_path_ops for a GIN index)
+		// and must be dropped+recreated if the spec changes it.
+		if strings.ToLower(strings.TrimSpace(a[i].OpClass)) != strings.ToLower(strings.TrimSpace(b[i].OpClass)) {
+			return false
+		}
 	}
 	return true
 }
@@ -165,9 +178,10 @@ func IndexToPostgresqlSchemaIndex(index *Index) *schemasv1alpha4.PostgresqlTable
 
 	for _, sc := range index.SortedColumns {
 		schemaIndex.SortedColumns = append(schemaIndex.SortedColumns, &schemasv1alpha4.PostgresqlTableIndexColumn{
-			Column: sc.Column,
-			Sort:   sc.Sort,
-			Nulls:  sc.Nulls,
+			Column:  sc.Column,
+			OpClass: sc.OpClass,
+			Sort:    sc.Sort,
+			Nulls:   sc.Nulls,
 		})
 	}
 
@@ -217,9 +231,10 @@ func PostgresqlSchemaIndexToIndex(schemaIndex *schemasv1alpha4.PostgresqlTableIn
 
 	for _, sc := range schemaIndex.SortedColumns {
 		index.SortedColumns = append(index.SortedColumns, IndexColumn{
-			Column: sc.Column,
-			Sort:   sc.Sort,
-			Nulls:  sc.Nulls,
+			Column:  sc.Column,
+			OpClass: sc.OpClass,
+			Sort:    sc.Sort,
+			Nulls:   sc.Nulls,
 		})
 	}
 

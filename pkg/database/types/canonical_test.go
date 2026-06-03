@@ -107,6 +107,18 @@ func Test_CanonicalizeSQLExpr_naturalEqualsCanonical(t *testing.T) {
 				"'failure'::character varying, 'partial'::character varying, " +
 				"'reassigned'::character varying])::text[]))",
 		},
+		{
+			// Feature B regression: COALESCE with an empty-string literal authored in
+			// natural form (no cast) must canonicalize equal to the pg_get_indexdef
+			// form which adds "::character varying". Without this, the
+			// blocks_cloud_id_unique mixed-expression index (which has COALESCE as one
+			// of four ordered elements) would force a drop+recreate on every plan
+			// because the spec writes COALESCE(account_id, '') but pg renders
+			// COALESCE(account_id, ''::character varying).
+			name:      "COALESCE with empty string natural equals pg ::character varying form",
+			natural:   "COALESCE(account_id, '')",
+			canonical: "COALESCE(account_id, ''::character varying)",
+		},
 	}
 
 	for _, test := range tests {

@@ -58,6 +58,69 @@ func Test_parseIndexElements(t *testing.T) {
 			wantSorted: nil,
 			wantExpr:   nil,
 		},
+		// === Feature A: operator class (opClass) recovery ===
+		{
+			// TRACE: introspecting "USING gin (conditions jsonb_path_ops)" must
+			// recover OpClass="jsonb_path_ops" on the SortedColumn for "conditions".
+			// pg_get_indexdef renders the opclass as a bare lowercase token after the
+			// column and before any sort/nulls keywords.
+			name:     "gin index with non-default opclass",
+			indexDef: "CREATE INDEX idx_blocks_conditions_gin ON public.blocks USING gin (conditions jsonb_path_ops)",
+			wantSorted: []types.IndexColumn{
+				{Column: "conditions", OpClass: "jsonb_path_ops"},
+			},
+			wantExpr: nil,
+		},
+		{
+			// opclass followed by explicit sort direction: opclass comes before
+			// DESC/ASC in pg_get_indexdef output. This exercises the correct
+			// token ordering in parseSortedColumnElement.
+			name:     "opclass with sort direction",
+			indexDef: "CREATE INDEX i ON t USING gin (data gin_trgm_ops DESC NULLS LAST)",
+			wantSorted: []types.IndexColumn{
+				{Column: "data", OpClass: "gin_trgm_ops", Sort: "DESC", Nulls: "LAST"},
+			},
+			wantExpr: nil,
+		},
+		{
+			// No opclass (default btree): the existing sort parsing must be
+			// unaffected — DESC/NULLS tokens are still keywords, not an opclass.
+			name:     "sort keywords are not mistaken for opclass",
+			indexDef: "CREATE INDEX i ON t USING btree (created_at DESC NULLS FIRST)",
+			wantSorted: []types.IndexColumn{
+				{Column: "created_at", Sort: "DESC", Nulls: "FIRST"},
+			},
+			wantExpr: nil,
+		},
+		// === Feature B: mixed column + expression ordered list ===
+		{
+			// TRACE: the blocks_cloud_id_unique index introspection — a mix of plain
+			// column references and a COALESCE expression. The element list must be
+			// returned entirely as Expressions in positional order, with
+			// SortedColumns=nil, to preserve the ordering that a split structure
+			// cannot represent.
+			name:       "mixed plain columns and expression returns all as ordered expressions",
+			indexDef:   "CREATE UNIQUE INDEX blocks_cloud_id_unique ON public.blocks USING btree (provider, resource_type, COALESCE(account_id, ''::character varying), cloud_id) WHERE ((cloud_id IS NOT NULL) AND (state <> ALL (ARRAY['deleted'::lifecycle_state, 'soft_deleted'::lifecycle_state])))",
+			wantSorted: nil,
+			wantExpr: []string{
+				"provider",
+				"resource_type",
+				"COALESCE(account_id, ''::character varying)",
+				"cloud_id",
+			},
+		},
+		{
+			// A purely plain multi-column index (no expressions) must still use the
+			// SortedColumns path when it carries ordering — the mixed-expression
+			// guard must not activate for the pure ordering case.
+			name:     "pure ordered columns are not affected by mixed-expression guard",
+			indexDef: "CREATE INDEX i ON public.blocks USING btree (created_at DESC, id)",
+			wantSorted: []types.IndexColumn{
+				{Column: "created_at", Sort: "DESC"},
+				{Column: "id"},
+			},
+			wantExpr: nil,
+		},
 	}
 
 	for _, tt := range tests {
