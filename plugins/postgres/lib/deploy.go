@@ -553,11 +553,29 @@ func BuildForeignKeyStatements(p *PostgresConnection, tableName string, postgres
 		return nil, err
 	}
 
+	// tableSchema is the schema of the FK table (e.g. "global" for
+	// "global.tenant_assignments"). ListTableForeignKeys returns the referenced
+	// table schema-qualified when it lives in a non-public schema, but a CRD spec
+	// typically declares the referenced table bare (e.g. "cells" rather than
+	// "global.cells"). Qualifying the declared reference with the FK table's own
+	// schema before comparison makes the two forms compare equal and prevents a
+	// spurious DROP+ADD on every plan.
+	tableSchema, _ := splitQualifiedTableName(tableName)
+
+	// desiredFKForCompare converts a spec FK to the internal type and qualifies
+	// its ParentTable with the FK table's schema when the declared reference is
+	// bare, so that "cells" matches the live "global.cells".
+	desiredFKForCompare := func(schemaFK *schemasv1alpha4.PostgresqlTableForeignKey) *types.ForeignKey {
+		fk := types.PostgresqlSchemaForeignKeyToForeignKey(schemaFK)
+		fk.ParentTable = types.QualifyParentTableToSchema(fk.ParentTable, tableSchema)
+		return fk
+	}
+
 	for _, foreignKey := range postgresTableSchema.ForeignKeys {
 		var statement string
 		var matchedForeignKey *types.ForeignKey
 		for _, currentForeignKey := range currentForeignKeys {
-			if currentForeignKey.Equals(types.PostgresqlSchemaForeignKeyToForeignKey(foreignKey)) {
+			if currentForeignKey.Equals(desiredFKForCompare(foreignKey)) {
 				goto Next
 			}
 
@@ -581,7 +599,7 @@ func BuildForeignKeyStatements(p *PostgresConnection, tableName string, postgres
 	for _, currentForeignKey := range currentForeignKeys {
 		var statement string
 		for _, foreignKey := range postgresTableSchema.ForeignKeys {
-			if currentForeignKey.Equals(types.PostgresqlSchemaForeignKeyToForeignKey(foreignKey)) {
+			if currentForeignKey.Equals(desiredFKForCompare(foreignKey)) {
 				goto NextCurrentFK
 			}
 		}
