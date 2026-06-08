@@ -111,6 +111,25 @@ func Test_triggerCreateStatement(t *testing.T) {
 			tableName:         "a",
 			expectedStatement: `create trigger "tt" after insert on "a" for each row execute function fn(paramName int)`,
 		},
+		{
+			// Regression: a schema-qualified table must render as quoted PARTS
+			// ("global"."cells"), not a single quoted identifier ("global.cells")
+			// which would target a nonexistent relation. Matches dropTriggerStatement.
+			name: "schema-qualified table renders quoted parts, not one identifier",
+			trigger: &schemasv1alpha4.PostgresqlTableTrigger{
+				Name: "cells_updated_at",
+				Events: []string{
+					"before update",
+				},
+				ForEachRow: &trueValue,
+				Execute: &schemasv1alpha4.PostgresqlTableTriggerExecute{
+					Type: "Function",
+					Name: "update_updated_at_column",
+				},
+			},
+			tableName:         "global.cells",
+			expectedStatement: `create trigger "cells_updated_at" before update on "global"."cells" for each row execute function update_updated_at_column()`,
+		},
 	}
 
 	for _, test := range tests {

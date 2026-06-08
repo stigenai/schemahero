@@ -20,7 +20,12 @@ func triggerCreateStatement(trigger *schemasv1alpha4.PostgresqlTableTrigger, tab
 		o = "constraint trigger"
 	}
 
-	stmt := fmt.Sprintf(`create %s %q %s on %q`, o, trigger.Name, triggerEventSyntax, tableName)
+	// Render the table schema-safely (sanitizeTableName: "global.cells" ->
+	// "global"."cells", bare "cells" -> "cells"). Using %q here would quote a
+	// schema-qualified name as a SINGLE identifier ("global.cells") and emit the
+	// trigger on a nonexistent relation. This is the same renderer (and the same
+	// hard-won lesson) as dropTriggerStatement.
+	stmt := fmt.Sprintf(`create %s %q %s on %s`, o, trigger.Name, triggerEventSyntax, sanitizeTableName(tableName))
 
 	forEachStatement := true // pg default
 	if trigger.ForEachRow != nil && *trigger.ForEachRow {
