@@ -158,6 +158,23 @@ func PostgresqlSchemaForeignKeyToForeignKey(schemaForeignKey *schemasv1alpha4.Po
 	return &foreignKey
 }
 
+// QualifyParentTableToSchema returns parentTable qualified with schema when
+// parentTable is a bare (unqualified) name and schema is non-empty. When
+// parentTable already contains a dot it is returned unchanged, preserving
+// explicitly-qualified references (e.g. "other_schema.table").
+//
+// This is used when comparing a spec-declared FK reference (which is typically
+// bare, e.g. "cells") against an introspected FK reference (which
+// ListTableForeignKeys returns as "schema.cells" for non-public schemas). A
+// bare declared name in the FK table's own schema should match the live
+// schema-qualified name without forcing a DROP+ADD on every plan.
+func QualifyParentTableToSchema(parentTable, schema string) string {
+	if schema == "" || strings.Contains(parentTable, ".") {
+		return parentTable
+	}
+	return fmt.Sprintf("%s.%s", schema, parentTable)
+}
+
 func SqliteSchemaForeignKeyToForeignKey(schemaForeignKey *schemasv1alpha4.SqliteTableForeignKey) *ForeignKey {
 	foreignKey := ForeignKey{
 		ChildColumns:  schemaForeignKey.Columns,

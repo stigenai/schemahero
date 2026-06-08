@@ -119,6 +119,28 @@ func Test_CanonicalizeSQLExpr_naturalEqualsCanonical(t *testing.T) {
 			natural:   "COALESCE(account_id, '')",
 			canonical: "COALESCE(account_id, ''::character varying)",
 		},
+		{
+			// Schema-qualified enum cast in a CHECK ARRAY predicate.
+			// pg_get_constraintdef returns "::global.cell_type" when the enum is
+			// declared in the "global" schema. A user authors the bare cast
+			// "::cell_type" (or no cast at all). Without consuming the "schema." prefix
+			// in skipTypeToken the canonical form retains "global" and never equals the
+			// natural form, forcing cells_dedicated_capacity_check to drop+recreate on
+			// every plan.
+			name:    "schema-qualified enum cast in ARRAY predicate (cells_dedicated_capacity_check)",
+			natural: "(type = ANY (ARRAY['dedicated','isolated'])) AND (capacity_max = 1) OR type = 'shared'",
+			canonical: "((type = ANY (ARRAY['dedicated'::global.cell_type, " +
+				"'isolated'::global.cell_type])) AND (capacity_max = 1)) OR " +
+				"(type = 'shared'::global.cell_type)",
+		},
+		{
+			// Schema-qualified enum cast in a partial-index WHERE clause.
+			// pg_get_indexdef returns "::global.cell_type" and "::global.cell_status"
+			// for idx_cells_available_shared; a user authors bare column comparisons.
+			name:      "schema-qualified enum casts in partial-index WHERE (idx_cells_available_shared)",
+			natural:   "type = 'shared' AND status = 'active'",
+			canonical: "(type = 'shared'::global.cell_type) AND (status = 'active'::global.cell_status)",
+		},
 	}
 
 	for _, test := range tests {

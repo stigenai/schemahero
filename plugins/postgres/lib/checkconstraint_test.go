@@ -262,3 +262,46 @@ func Test_normalizeCheckExpr(t *testing.T) {
 	assert.Equal(t, "status = 'a'", normalizeCheckExpr("((status)::text = 'a'::character varying)"))
 	assert.Equal(t, "a and b", normalizeCheckExpr("(A AND B)"))
 }
+
+// Test_checkExprEquivalent_schemaQualifiedEnumCasts guards against spurious
+// DROP+ADD of CHECK constraints whose pg_get_constraintdef output contains
+// schema-qualified enum casts (e.g. "::global.cell_type"). Without stripping
+// the "schema." prefix in skipTypeToken, the normalizer leaves the schema name
+// in the canonical form and the declared expression never compares equal to the
+// live one — forcing cells_dedicated_capacity_check to drop+recreate on every
+// plan (a table-scan lock on the global.cells table).
+//
+// The exact strings below are taken from real pg_get_constraintdef output.
+func Test_checkExprEquivalent_schemaQualifiedEnumCasts(t *testing.T) {
+	tests := []struct {
+		name     string
+		declared string // authored in the CRD spec
+		live     string // from pg_get_constraintdef(oid, true)
+		want     bool
+	}{
+		{
+			name:     "cells_dedicated_capacity_check: bare casts declared, schema-qualified in live",
+			declared: "(type = ANY (ARRAY['dedicated','isolated'])) AND (capacity_max = 1) OR type = 'shared'",
+			live:     "((type = ANY (ARRAY['dedicated'::global.cell_type, 'isolated'::global.cell_type])) AND (capacity_max = 1)) OR (type = 'shared'::global.cell_type)",
+			want:     true,
+		},
+		{
+			name:     "schema-qualified casts: both sides schema-qualified are equal",
+			declared: "type = 'shared'::global.cell_type",
+			live:     "(type = 'shared'::global.cell_type)",
+			want:     true,
+		},
+		{
+			name:     "genuinely different enum values are not equivalent",
+			declared: "type = 'shared'",
+			live:     "(type = 'dedicated'::global.cell_type)",
+			want:     false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, checkExprEquivalent(test.declared, test.live))
+		})
+	}
+}
