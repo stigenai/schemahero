@@ -221,6 +221,22 @@ func skipTypeToken(s string, i int) int {
 
 	i = consumeWord(i)
 
+	// Extend across a schema-qualified type name: "::global.cell_type".
+	// PostgreSQL renders enum casts in schema-qualified form when the enum is not
+	// in the search_path, e.g. "::global.cell_type" rather than "::cell_type". The
+	// dot is not an identifier character so consumeWord stops after "global"; we
+	// must consume the "." and the following word to strip the full cast token.
+	// This cannot swallow a table-qualified reference that follows an unparenthesized
+	// cast because a "schema.table" reference is always preceded by whitespace or an
+	// operator, not immediately after the type name.
+	if i < len(s) && s[i] == '.' {
+		j := i + 1
+		next := consumeWord(j)
+		if next > j {
+			i = next
+		}
+	}
+
 	// Extend across multi-word type names, but ONLY for known continuation words.
 	for {
 		j := i

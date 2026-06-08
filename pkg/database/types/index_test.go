@@ -281,6 +281,25 @@ func Test_IndexEquals(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			// Schema-qualified enum cast in a partial-index WHERE clause.
+			// pg_get_indexdef returns "::global.cell_type" and "::global.cell_status"
+			// for idx_cells_available_shared. A user authors the predicate with bare
+			// string literals (no cast); the planner must treat these as equal so the
+			// index is not dropped+recreated on every plan.
+			name: "schema-qualified enum casts in WHERE equal bare string literals (idx_cells_available_shared)",
+			a: &Index{
+				Name:    "idx_cells_available_shared",
+				Columns: []string{"tenant_id"},
+				Where:   "type = 'shared' AND status = 'active'",
+			},
+			b: &Index{
+				Name:    "idx_cells_available_shared",
+				Columns: []string{"tenant_id"},
+				Where:   "(type = 'shared'::global.cell_type) AND (status = 'active'::global.cell_status)",
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
